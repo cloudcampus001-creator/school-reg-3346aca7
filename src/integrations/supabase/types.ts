@@ -155,6 +155,7 @@ export type Database = {
           fee_structure: Database["public"]["Enums"]["fee_structure"]
           id: string
           school_id: string
+          settlement_account: string | null
           uniform_registration_fee: number
           uniform_tuition_fee: number
         }
@@ -164,6 +165,7 @@ export type Database = {
           fee_structure?: Database["public"]["Enums"]["fee_structure"]
           id?: string
           school_id: string
+          settlement_account?: string | null
           uniform_registration_fee?: number
           uniform_tuition_fee?: number
         }
@@ -173,6 +175,7 @@ export type Database = {
           fee_structure?: Database["public"]["Enums"]["fee_structure"]
           id?: string
           school_id?: string
+          settlement_account?: string | null
           uniform_registration_fee?: number
           uniform_tuition_fee?: number
         }
@@ -276,6 +279,7 @@ export type Database = {
       user_roles: {
         Row: {
           created_at: string
+          full_name: string | null
           id: string
           role: Database["public"]["Enums"]["app_role"]
           school_id: string | null
@@ -283,6 +287,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          full_name?: string | null
           id?: string
           role: Database["public"]["Enums"]["app_role"]
           school_id?: string | null
@@ -290,6 +295,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          full_name?: string | null
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           school_id?: string | null
