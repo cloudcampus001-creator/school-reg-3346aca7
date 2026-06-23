@@ -3,13 +3,22 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { GraduationCap, Loader2, LogIn } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { getMyRole } from "@/lib/admin.functions";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({
-    meta: [{ title: "School staff sign-in — SchoolConnect" }],
-  }),
+  head: () => ({ meta: [{ title: "Staff sign-in — SchoolConnect" }] }),
   component: AuthPage,
 });
+
+async function routeByRole(navigate: ReturnType<typeof useNavigate>) {
+  try {
+    const r = await getMyRole();
+    if (r.role === "bursar") navigate({ to: "/bursar", replace: true });
+    else navigate({ to: "/admin", replace: true });
+  } catch {
+    navigate({ to: "/admin", replace: true });
+  }
+}
 
 function AuthPage() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -20,7 +29,7 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/admin" });
+      if (data.session) routeByRole(navigate);
     });
   }, [navigate]);
 
@@ -31,16 +40,14 @@ function AuthPage() {
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        toast.success("Welcome back");
       } else {
         const { error } = await supabase.auth.signUp({
-          email, password,
-          options: { emailRedirectTo: window.location.origin + "/admin" },
+          email, password, options: { emailRedirectTo: window.location.origin + "/admin" },
         });
         if (error) throw error;
-        toast.success("Account created");
       }
-      navigate({ to: "/admin" });
+      toast.success("Welcome");
+      await routeByRole(navigate);
     } catch (e: any) { toast.error(e.message); }
     finally { setLoading(false); }
   }
@@ -55,14 +62,12 @@ function AuthPage() {
           SchoolConnect
         </Link>
       </header>
-
       <div className="flex-1 flex items-center justify-center px-5">
         <div className="card-surface p-8 w-full max-w-md">
           <h1 className="text-2xl font-bold">School staff portal</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {mode === "signin" ? "Sign in to manage applications and finance." : "Create your staff account."}
+            {mode === "signin" ? "Sign in to your admin or bursar account." : "Create the first administrator account."}
           </p>
-
           <form onSubmit={submit} className="mt-6 grid gap-4">
             <label className="block">
               <span className="text-sm font-medium">Email</span>
@@ -76,16 +81,14 @@ function AuthPage() {
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><LogIn className="h-4 w-4" /> {mode === "signin" ? "Sign in" : "Create account"}</>}
             </button>
           </form>
-
           <div className="mt-4 text-sm text-center text-muted-foreground">
             {mode === "signin" ? "First time here? " : "Already have an account? "}
             <button onClick={() => setMode(mode === "signin" ? "signup" : "signin")} className="text-primary font-medium">
-              {mode === "signin" ? "Create an account" : "Sign in"}
+              {mode === "signin" ? "Create the admin account" : "Sign in"}
             </button>
           </div>
-
           <p className="mt-6 text-xs text-muted-foreground border-t border-border pt-4">
-            <strong>Demo:</strong> the first account to sign up becomes the school admin automatically.
+            <strong>Bursar accounts</strong> are deployed by the administrator from the Command Board.
           </p>
         </div>
       </div>
