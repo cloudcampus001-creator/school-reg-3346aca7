@@ -56,7 +56,7 @@ export const admitStudent = createServerFn({ method: "POST" })
     const { data: enrollmentId, error } = await supabaseAdmin.rpc("admit_student", {
       _school_id: DEMO_SCHOOL_ID, _school_slug: DEMO_SCHOOL_SLUG,
       _full_name: data.full_name, _gender: data.gender, _dob: data.date_of_birth,
-      _place: data.place_of_birth ?? null, _phone: data.parent_phone,
+      _place: data.place_of_birth ?? "", _phone: data.parent_phone,
       _class_id: data.class_id, _extra: data.extra_fields ?? {},
     });
     if (error) throw new Error(error.message);
