@@ -88,10 +88,10 @@ function Landing() {
         </p>
         <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { icon: GraduationCap, title: "Online admissions", body: "Parents submit applications in minutes. Real-time status updates." },
-            { icon: Smartphone, title: "Mobile money", body: "MTN MoMo & Orange Money for registration and tuition payments." },
-            { icon: Search, title: "Matricule recovery", body: "Lost a matricule? Look it up by parent phone number." },
-            { icon: Printer, title: "Thermal receipts", body: "Print queue feeds Bluetooth thermal printers at the bursar's desk." },
+            { icon: GraduationCap, title: "Bursar-led admissions", body: "Staff admit students in seconds. Matricule generated instantly, no pending queues." },
+            { icon: Smartphone, title: "Mobile money", body: "MTN MoMo & Orange Money for registration and tuition — parents pay themselves." },
+            { icon: Search, title: "Typo-tolerant search", body: "Parents find their child by name — spelling and word order are forgiven." },
+            { icon: Printer, title: "Printed receipts", body: "Every payment prints an 80mm receipt via the browser's OS print dialog." },
           ].map((f) => (
             <div key={f.title} className="card-surface p-5">
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary">
