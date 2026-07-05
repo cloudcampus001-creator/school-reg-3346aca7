@@ -113,7 +113,7 @@ export const bursarPay = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: res, error } = await supabaseAdmin.rpc("record_payment", {
       _enrollment_id: data.enrollment_id, _type: data.type, _amount: data.amount,
-      _method: data.payment_method, _phone: null as any,
+      _method: data.payment_method, _phone: "",
     });
     if (error) throw new Error(error.message);
     const row = Array.isArray(res) ? res[0] : res;
