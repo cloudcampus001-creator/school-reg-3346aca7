@@ -14,14 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
-      classes: {
+      admission_field_defs: {
+        Row: {
+          created_at: string
+          data_type: Database["public"]["Enums"]["admission_field_type"]
+          id: string
+          is_required: boolean
+          label: string
+          options: Json | null
+          school_year_id: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          data_type?: Database["public"]["Enums"]["admission_field_type"]
+          id?: string
+          is_required?: boolean
+          label: string
+          options?: Json | null
+          school_year_id: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          data_type?: Database["public"]["Enums"]["admission_field_type"]
+          id?: string
+          is_required?: boolean
+          label?: string
+          options?: Json | null
+          school_year_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admission_field_defs_school_year_id_fkey"
+            columns: ["school_year_id"]
+            isOneToOne: false
+            referencedRelation: "school_years"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_levels: {
         Row: {
           created_at: string
           id: string
           name: string
           school_id: string
-          segmented_registration_fee: number | null
-          segmented_tuition_fee: number | null
+          school_year_id: string
           sort_order: number
         }
         Insert: {
@@ -29,8 +69,7 @@ export type Database = {
           id?: string
           name: string
           school_id: string
-          segmented_registration_fee?: number | null
-          segmented_tuition_fee?: number | null
+          school_year_id: string
           sort_order?: number
         }
         Update: {
@@ -38,16 +77,80 @@ export type Database = {
           id?: string
           name?: string
           school_id?: string
+          school_year_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_levels_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_levels_school_year_id_fkey"
+            columns: ["school_year_id"]
+            isOneToOne: false
+            referencedRelation: "school_years"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      classes: {
+        Row: {
+          created_at: string
+          id: string
+          level_id: string | null
+          name: string
+          school_id: string
+          school_year_id: string | null
+          segmented_registration_fee: number | null
+          segmented_tuition_fee: number | null
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          level_id?: string | null
+          name: string
+          school_id: string
+          school_year_id?: string | null
+          segmented_registration_fee?: number | null
+          segmented_tuition_fee?: number | null
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          level_id?: string | null
+          name?: string
+          school_id?: string
+          school_year_id?: string | null
           segmented_registration_fee?: number | null
           segmented_tuition_fee?: number | null
           sort_order?: number
         }
         Relationships: [
           {
+            foreignKeyName: "classes_level_id_fkey"
+            columns: ["level_id"]
+            isOneToOne: false
+            referencedRelation: "class_levels"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "classes_school_id_fkey"
             columns: ["school_id"]
             isOneToOne: false
             referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "classes_school_year_id_fkey"
+            columns: ["school_year_id"]
+            isOneToOne: false
+            referencedRelation: "school_years"
             referencedColumns: ["id"]
           },
         ]
@@ -56,6 +159,7 @@ export type Database = {
         Row: {
           amount: number
           created_at: string
+          enrollment_id: string | null
           id: string
           payment_method: string
           payment_phone: string | null
@@ -68,6 +172,7 @@ export type Database = {
         Insert: {
           amount: number
           created_at?: string
+          enrollment_id?: string | null
           id?: string
           payment_method: string
           payment_phone?: string | null
@@ -80,6 +185,7 @@ export type Database = {
         Update: {
           amount?: number
           created_at?: string
+          enrollment_id?: string | null
           id?: string
           payment_method?: string
           payment_phone?: string | null
@@ -90,6 +196,13 @@ export type Database = {
           type?: Database["public"]["Enums"]["transaction_type"]
         }
         Relationships: [
+          {
+            foreignKeyName: "financial_transactions_enrollment_id_fkey"
+            columns: ["enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "student_enrollments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "financial_transactions_school_id_fkey"
             columns: ["school_id"]
@@ -154,7 +267,9 @@ export type Database = {
           currency: string
           fee_structure: Database["public"]["Enums"]["fee_structure"]
           id: string
+          min_installment_amount: number | null
           school_id: string
+          school_year_id: string | null
           settlement_account: string | null
           uniform_registration_fee: number
           uniform_tuition_fee: number
@@ -164,7 +279,9 @@ export type Database = {
           currency?: string
           fee_structure?: Database["public"]["Enums"]["fee_structure"]
           id?: string
+          min_installment_amount?: number | null
           school_id: string
+          school_year_id?: string | null
           settlement_account?: string | null
           uniform_registration_fee?: number
           uniform_tuition_fee?: number
@@ -174,7 +291,9 @@ export type Database = {
           currency?: string
           fee_structure?: Database["public"]["Enums"]["fee_structure"]
           id?: string
+          min_installment_amount?: number | null
           school_id?: string
+          school_year_id?: string | null
           settlement_account?: string | null
           uniform_registration_fee?: number
           uniform_tuition_fee?: number
@@ -184,6 +303,51 @@ export type Database = {
             foreignKeyName: "school_configs_school_id_fkey"
             columns: ["school_id"]
             isOneToOne: true
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "school_configs_school_year_id_fkey"
+            columns: ["school_year_id"]
+            isOneToOne: false
+            referencedRelation: "school_years"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      school_years: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          id: string
+          label: string
+          school_id: string
+          starts_on: string
+          status: Database["public"]["Enums"]["school_year_status"]
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          id?: string
+          label: string
+          school_id: string
+          starts_on?: string
+          status?: Database["public"]["Enums"]["school_year_status"]
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          id?: string
+          label?: string
+          school_id?: string
+          starts_on?: string
+          status?: Database["public"]["Enums"]["school_year_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "school_years_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
             referencedRelation: "schools"
             referencedColumns: ["id"]
           },
@@ -210,63 +374,123 @@ export type Database = {
         }
         Relationships: []
       }
-      students: {
+      student_enrollments: {
         Row: {
-          application_status: Database["public"]["Enums"]["application_status"]
           class_id: string | null
           created_at: string
-          date_of_birth: string
-          full_name: string
-          gender: string
+          dismissed: boolean
+          dismissed_reason: string | null
+          enrollment_kind: Database["public"]["Enums"]["enrollment_kind"]
+          extra_fields: Json
           id: string
           is_registered: boolean
-          matricule: string | null
-          parent_phone: string
-          place_of_birth: string | null
-          school_id: string
+          promotion_decision:
+            | Database["public"]["Enums"]["promotion_decision"]
+            | null
+          school_year_id: string
+          student_id: string
           tuition_paid: number
+          tuition_required: number
           updated_at: string
         }
         Insert: {
-          application_status?: Database["public"]["Enums"]["application_status"]
           class_id?: string | null
           created_at?: string
-          date_of_birth: string
-          full_name: string
-          gender: string
+          dismissed?: boolean
+          dismissed_reason?: string | null
+          enrollment_kind?: Database["public"]["Enums"]["enrollment_kind"]
+          extra_fields?: Json
           id?: string
           is_registered?: boolean
-          matricule?: string | null
-          parent_phone: string
-          place_of_birth?: string | null
-          school_id: string
+          promotion_decision?:
+            | Database["public"]["Enums"]["promotion_decision"]
+            | null
+          school_year_id: string
+          student_id: string
           tuition_paid?: number
+          tuition_required?: number
           updated_at?: string
         }
         Update: {
-          application_status?: Database["public"]["Enums"]["application_status"]
           class_id?: string | null
           created_at?: string
-          date_of_birth?: string
-          full_name?: string
-          gender?: string
+          dismissed?: boolean
+          dismissed_reason?: string | null
+          enrollment_kind?: Database["public"]["Enums"]["enrollment_kind"]
+          extra_fields?: Json
           id?: string
           is_registered?: boolean
-          matricule?: string | null
-          parent_phone?: string
-          place_of_birth?: string | null
-          school_id?: string
+          promotion_decision?:
+            | Database["public"]["Enums"]["promotion_decision"]
+            | null
+          school_year_id?: string
+          student_id?: string
           tuition_paid?: number
+          tuition_required?: number
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "students_class_id_fkey"
+            foreignKeyName: "student_enrollments_class_id_fkey"
             columns: ["class_id"]
             isOneToOne: false
             referencedRelation: "classes"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "student_enrollments_school_year_id_fkey"
+            columns: ["school_year_id"]
+            isOneToOne: false
+            referencedRelation: "school_years"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_enrollments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      students: {
+        Row: {
+          created_at: string
+          date_of_birth: string
+          full_name: string
+          gender: string
+          id: string
+          matricule: string | null
+          parent_phone: string
+          place_of_birth: string | null
+          school_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date_of_birth: string
+          full_name: string
+          gender: string
+          id?: string
+          matricule?: string | null
+          parent_phone: string
+          place_of_birth?: string | null
+          school_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date_of_birth?: string
+          full_name?: string
+          gender?: string
+          id?: string
+          matricule?: string | null
+          parent_phone?: string
+          place_of_birth?: string | null
+          school_id?: string
+          updated_at?: string
+        }
+        Relationships: [
           {
             foreignKeyName: "students_school_id_fkey"
             columns: ["school_id"]
@@ -316,7 +540,40 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      generate_matricule: { Args: { _school_slug: string }; Returns: string }
+      admit_student: {
+        Args: {
+          _class_id: string
+          _dob: string
+          _extra: Json
+          _full_name: string
+          _gender: string
+          _phone: string
+          _place: string
+          _school_id: string
+          _school_slug: string
+        }
+        Returns: string
+      }
+      close_school_year: { Args: { _school_id: string }; Returns: undefined }
+      compute_registration_required: {
+        Args: { _class_id: string; _year_id: string }
+        Returns: number
+      }
+      compute_tuition_required: {
+        Args: { _class_id: string; _year_id: string }
+        Returns: number
+      }
+      create_school_year: { Args: { _payload: Json }; Returns: string }
+      dismiss_student: {
+        Args: { _enrollment_id: string; _reason: string }
+        Returns: undefined
+      }
+      generate_matricule:
+        | { Args: { _school_slug: string }; Returns: string }
+        | {
+            Args: { _school_slug: string; _year_label: string }
+            Returns: string
+          }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -324,12 +581,50 @@ export type Database = {
         }
         Returns: boolean
       }
+      record_payment: {
+        Args: {
+          _amount: number
+          _enrollment_id: string
+          _method: string
+          _phone: string
+          _type: string
+        }
+        Returns: {
+          reference: string
+          transaction_id: string
+        }[]
+      }
+      search_students: {
+        Args: { _q: string; _school_id: string; _year_id: string }
+        Returns: {
+          class_id: string
+          class_name: string
+          enrollment_id: string
+          full_name: string
+          is_registered: boolean
+          level_name: string
+          matricule: string
+          score: number
+          student_id: string
+          tuition_paid: number
+          tuition_required: number
+        }[]
+      }
+      set_promotion: {
+        Args: { _decision: string; _enrollment_id: string }
+        Returns: undefined
+      }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
+      admission_field_type: "TEXT" | "NUMBER" | "DATE" | "BOOLEAN" | "SELECT"
       app_role: "admin" | "bursar"
-      application_status: "PENDING_REVIEW" | "APPROVED" | "REJECTED"
+      enrollment_kind: "NEW_ADMIT" | "OLD_STUDENT"
       fee_structure: "UNIFORM" | "SEGMENTED"
       print_job_status: "PENDING" | "PRINTED" | "FAILED"
+      promotion_decision: "PROMOTED" | "REPEATED"
+      school_year_status: "OPEN" | "CLOSED"
       transaction_status: "PENDING" | "SUCCESS" | "FAILED"
       transaction_type: "REGISTRATION" | "TUITION"
     }
@@ -459,10 +754,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      admission_field_type: ["TEXT", "NUMBER", "DATE", "BOOLEAN", "SELECT"],
       app_role: ["admin", "bursar"],
-      application_status: ["PENDING_REVIEW", "APPROVED", "REJECTED"],
+      enrollment_kind: ["NEW_ADMIT", "OLD_STUDENT"],
       fee_structure: ["UNIFORM", "SEGMENTED"],
       print_job_status: ["PENDING", "PRINTED", "FAILED"],
+      promotion_decision: ["PROMOTED", "REPEATED"],
+      school_year_status: ["OPEN", "CLOSED"],
       transaction_status: ["PENDING", "SUCCESS", "FAILED"],
       transaction_type: ["REGISTRATION", "TUITION"],
     },

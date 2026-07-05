@@ -1,22 +1,25 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import QRCode from "qrcode";
-import { jsPDF } from "jspdf";
 import {
-  GraduationCap, LogOut, Loader2, ShieldAlert, QrCode, Download, Wallet, Users, Clock,
-  Plus, Trash2, UserPlus, Filter,
+  GraduationCap, LogOut, Loader2, ShieldAlert, Users, Info as InfoIcon, Settings2, Download,
+  QrCode, Lock, Trash2, ArrowUp, RotateCcw, Plus, X, Search,
 } from "lucide-react";
+import QRCode from "qrcode";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  getMyRole, claimAdminIfNone, getAdminOverview, getSchoolConfig, updateSchoolConfig,
-  listClasses, addClass, deleteClass, listBursars, createBursar, listStudentLedger,
+  getMyRole, claimAdminIfNone, getRevenueBreakdown, getStudentKpis, listRosterForAdmin,
+  dismissStudent, setPromotion, getYearParameters, closeSchoolYear, createSchoolYear,
+  listPromotionQueue, listBursars, createBursar,
 } from "@/lib/admin.functions";
+import { DangerConfirm, useDangerConfirm } from "@/components/DangerConfirm";
 
 export const Route = createFileRoute("/admin")({
-  head: () => ({ meta: [{ title: "Admin Command Board · SchoolConnect" }] }),
+  head: () => ({ meta: [{ title: "Admin Dashboard · SchoolConnect" }] }),
   component: AdminPage,
 });
 
@@ -29,30 +32,22 @@ function AdminPage() {
       else setReady(true);
     });
   }, [navigate]);
-  if (!ready) return <Center><Loader2 className="h-6 w-6 animate-spin text-primary" /></Center>;
+  if (!ready) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   return <AdminShell />;
-}
-
-function Center({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen flex items-center justify-center">{children}</div>;
 }
 
 function AdminShell() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const roleFn = useServerFn(getMyRole);
   const claimFn = useServerFn(claimAdminIfNone);
-  const qc = useQueryClient();
-  const { data: role, isLoading } = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
+  const { data: role, isLoading, refetch } = useQuery({ queryKey: ["my-role"], queryFn: () => roleFn() });
 
   useEffect(() => {
     if (role?.role === "bursar") navigate({ to: "/bursar", replace: true });
   }, [role, navigate]);
 
-  const claim = useMutation({
-    mutationFn: () => claimFn(),
-    onSuccess: () => { toast.success("You're now the school admin."); qc.invalidateQueries({ queryKey: ["my-role"] }); },
-    onError: (e: any) => toast.error(e.message),
-  });
+  const [tab, setTab] = useState<"info" | "students" | "params">("info");
 
   async function signOut() {
     await qc.cancelQueries(); qc.clear();
@@ -60,7 +55,27 @@ function AdminShell() {
     navigate({ to: "/auth", replace: true });
   }
 
-  if (isLoading) return <Center><Loader2 className="h-6 w-6 animate-spin text-primary" /></Center>;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+
+  if (role?.role !== "admin") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-5">
+        <div className="card-surface p-8 text-center max-w-md">
+          <ShieldAlert className="h-10 w-10 text-warning mx-auto" />
+          <h1 className="mt-3 text-xl font-bold">Admin access required</h1>
+          {role?.adminCount === 0 ? (
+            <>
+              <p className="mt-2 text-sm text-muted-foreground">No admin exists yet. Claim it now.</p>
+              <button onClick={async () => { await claimFn(); toast.success("You are now the admin"); refetch(); }} className="btn-primary mt-4">Claim admin</button>
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">Ask an existing admin to grant you access.</p>
+          )}
+          <button onClick={signOut} className="btn-ghost mt-4">Sign out</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
@@ -70,305 +85,599 @@ function AdminShell() {
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg hero-gradient">
               <GraduationCap className="h-5 w-5" />
             </span>
-            Command Board · Admin
+            Admin Command Board
           </Link>
-          <button onClick={signOut} className="btn-ghost"><LogOut className="h-4 w-4" /> Sign out</button>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground hidden sm:inline">{role.full_name}</span>
+            <button onClick={signOut} className="btn-ghost"><LogOut className="h-4 w-4" /> Sign out</button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-5 py-8 space-y-8">
-        {role?.role !== "admin" ? (
-          <div className="card-surface p-8 text-center max-w-lg mx-auto">
-            <ShieldAlert className="h-10 w-10 text-warning mx-auto" />
-            <h1 className="mt-3 text-xl font-bold">No admin access yet</h1>
-            {role?.adminCount === 0 ? (
-              <>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  No admin exists yet. Claim the role to bootstrap the system.
-                </p>
-                <button onClick={() => claim.mutate()} disabled={claim.isPending} className="btn-primary mt-5">
-                  {claim.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Claim admin role"}
-                </button>
-              </>
-            ) : (
-              <p className="mt-2 text-sm text-muted-foreground">Ask an existing admin to grant you access.</p>
-            )}
-          </div>
-        ) : (
-          <>
-            <DashboardSummary />
-            <FinancialRulesEngine />
-            <ClassSegments />
-            <BursarProvisioning />
-            <StudentLedger />
-          </>
-        )}
+        <div className="flex gap-2 border-b border-border">
+          <TabBtn active={tab === "info"} onClick={() => setTab("info")} icon={InfoIcon} label="School info" />
+          <TabBtn active={tab === "students"} onClick={() => setTab("students")} icon={Users} label="Students info" />
+          <TabBtn active={tab === "params"} onClick={() => setTab("params")} icon={Settings2} label="School year" />
+        </div>
+
+        {tab === "info" && <SchoolInfoTab />}
+        {tab === "students" && <StudentsInfoTab />}
+        {tab === "params" && <YearParamsTab />}
       </main>
     </div>
   );
 }
 
-/* ===== 1. DASHBOARD SUMMARY ===== */
-function DashboardSummary() {
-  const ov = useServerFn(getAdminOverview);
-  const { data } = useQuery({ queryKey: ["overview"], queryFn: () => ov() });
-  const portalUrl = typeof window !== "undefined" ? window.location.origin + "/portal" : "";
-  const [qrUrl, setQrUrl] = useState<string>("");
-  const [showQr, setShowQr] = useState(false);
-
-  useEffect(() => {
-    if (portalUrl) QRCode.toDataURL(portalUrl, { width: 320, margin: 1 }).then(setQrUrl);
-  }, [portalUrl]);
-
-  function downloadPdf() {
-    const pdf = new jsPDF({ unit: "mm", format: "a4" });
-    pdf.setFontSize(20); pdf.text("Demo Academy", 105, 30, { align: "center" });
-    pdf.setFontSize(12); pdf.text("Parent Portal — scan to register", 105, 40, { align: "center" });
-    if (qrUrl) pdf.addImage(qrUrl, "PNG", 65, 55, 80, 80);
-    pdf.setFontSize(10); pdf.text(portalUrl, 105, 145, { align: "center" });
-    pdf.save("schoolconnect-portal-qr.pdf");
-  }
-
+function TabBtn({ active, onClick, icon: Icon, label }: any) {
   return (
-    <section>
-      <h2 className="text-xs uppercase tracking-wider text-muted-foreground mb-3">1 · Dashboard Summary</h2>
-      <div className="grid lg:grid-cols-4 sm:grid-cols-2 gap-3">
-        <button onClick={() => setShowQr(v => !v)} className="card-surface p-5 text-left hover:border-primary transition">
-          <QrCode className="h-6 w-6 text-primary" />
-          <div className="mt-2 font-semibold">Parent Portal QR</div>
-          <div className="text-xs text-muted-foreground">Tap to view & download as PDF</div>
-        </button>
-        <Kpi icon={Wallet} label="Gross Revenue" value={`${(data?.grossRevenue ?? 0).toLocaleString()} XAF`} />
-        <Kpi icon={Users} label="Registered Active Students" value={`${data?.registeredActive ?? 0} / ${data?.totalStudents ?? 0}`} />
-        <Kpi icon={Clock} label="Pending Action" value={`${data?.pendingAction ?? 0}`} accent={(data?.pendingAction ?? 0) > 0} />
-      </div>
-
-      {showQr && (
-        <div className="card-surface p-6 mt-4 flex flex-col sm:flex-row gap-6 items-center">
-          {qrUrl ? <img src={qrUrl} alt="Parent portal QR" className="h-56 w-56 rounded-lg border border-border" /> : <Loader2 className="h-6 w-6 animate-spin" />}
-          <div className="flex-1">
-            <h3 className="font-semibold">Print & display this QR code</h3>
-            <p className="text-sm text-muted-foreground mt-1 break-all">{portalUrl}</p>
-            <button onClick={downloadPdf} className="btn-primary mt-4"><Download className="h-4 w-4" /> Download PDF</button>
-          </div>
-        </div>
-      )}
-    </section>
+    <button onClick={onClick}
+      className={"px-4 py-2 flex items-center gap-2 text-sm font-medium border-b-2 -mb-px " + (active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
+      <Icon className="h-4 w-4" /> {label}
+    </button>
   );
 }
-function Kpi({ icon: Icon, label, value, accent }: { icon: any; label: string; value: string; accent?: boolean }) {
+
+/* ============ TAB 1 — SCHOOL INFO ============ */
+function SchoolInfoTab() {
+  const revFn = useServerFn(getRevenueBreakdown);
+  const bursarsFn = useServerFn(listBursars);
+  const { data: rev } = useQuery({ queryKey: ["revenue"], queryFn: () => revFn() });
+  const { data: bursars } = useQuery({ queryKey: ["bursars"], queryFn: () => bursarsFn() });
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
+  const portalUrl = typeof window !== "undefined" ? `${window.location.origin}/portal` : "";
+
+  useEffect(() => {
+    if (portalUrl) QRCode.toDataURL(portalUrl, { width: 400, margin: 2 }).then(setQrDataUrl);
+  }, [portalUrl]);
+
+  function downloadQrPdf() {
+    if (!qrDataUrl) return;
+    const doc = new jsPDF();
+    doc.setFontSize(18); doc.text("Demo Academy — Parent Portal", 20, 20);
+    doc.setFontSize(11); doc.text("Scan this code to find your child and pay school fees.", 20, 30);
+    doc.addImage(qrDataUrl, "PNG", 55, 45, 100, 100);
+    doc.setFontSize(10); doc.text(portalUrl, 20, 160);
+    doc.save("parent-portal-qr.pdf");
+  }
+
+  const total = rev?.total ?? 0;
+  const findAmt = (k: string) => rev?.breakdown.find(b => b.key === k)?.amount ?? 0;
+  const findPct = (k: string) => rev?.breakdown.find(b => b.key === k)?.pct ?? 0;
+
   return (
-    <div className={"card-surface p-5 " + (accent ? "border-warning" : "")}>
-      <Icon className="h-6 w-6 text-primary" />
-      <div className="mt-2 text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-bold">{value}</div>
+    <div className="space-y-6">
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="card-surface p-5">
+          <div className="text-xs uppercase text-muted-foreground">Parent portal QR</div>
+          <div className="mt-3 flex items-center gap-4">
+            {qrDataUrl ? <img src={qrDataUrl} alt="Portal QR" className="h-32 w-32 rounded-md border border-border" /> : <div className="h-32 w-32 bg-muted rounded-md" />}
+            <div className="flex-1">
+              <div className="text-sm">Print & display at the school entrance.</div>
+              <div className="text-xs text-muted-foreground break-all mt-1">{portalUrl}</div>
+              <button onClick={downloadQrPdf} className="btn-primary mt-3 text-sm"><QrCode className="h-4 w-4" /> Download PDF</button>
+            </div>
+          </div>
+        </div>
+        <div className="card-surface p-5">
+          <div className="text-xs uppercase text-muted-foreground">Total collected (this year)</div>
+          <div className="mt-2 text-3xl font-display font-bold">{total.toLocaleString()} XAF</div>
+          <div className="mt-4 space-y-2 text-sm">
+            <BreakdownRow label="Mobile Money" amount={findAmt("MOBILE_MONEY")} pct={findPct("MOBILE_MONEY")} />
+            <BreakdownRow label="Cash" amount={findAmt("CASH")} pct={findPct("CASH")} />
+            <BreakdownRow label="Bank" amount={findAmt("BANK")} pct={findPct("BANK")} />
+          </div>
+        </div>
+      </div>
+
+      <BursarsSection bursars={bursars ?? []} />
     </div>
   );
 }
 
-/* ===== 2. FINANCIAL RULES ENGINE ===== */
-function FinancialRulesEngine() {
-  const cfgFn = useServerFn(getSchoolConfig);
-  const saveFn = useServerFn(updateSchoolConfig);
-  const qc = useQueryClient();
-  const { data: cfg } = useQuery({ queryKey: ["school-config"], queryFn: () => cfgFn() });
-  const save = useMutation({
-    mutationFn: (vars: any) => saveFn({ data: vars }),
-    onSuccess: () => { toast.success("Saved"); qc.invalidateQueries({ queryKey: ["school-config"] }); },
-    onError: (e: any) => toast.error(e.message),
-  });
+function BreakdownRow({ label, amount, pct }: { label: string; amount: number; pct: number }) {
+  return (
+    <div>
+      <div className="flex justify-between"><span>{label}</span><span className="font-mono">{amount.toLocaleString()} XAF · {pct}%</span></div>
+      <div className="h-2 bg-muted rounded mt-1 overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
 
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+function BursarsSection({ bursars }: { bursars: any[] }) {
+  const fn = useServerFn(createBursar);
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ full_name: "", email: "", password: "" });
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    save.mutate({
-      fee_structure: String(fd.get("fee_structure")) as "UNIFORM" | "SEGMENTED",
-      uniform_registration_fee: Number(fd.get("uniform_registration_fee")),
-      uniform_tuition_fee: Number(fd.get("uniform_tuition_fee")),
-      settlement_account: String(fd.get("settlement_account") || "") || null,
-    });
+    setBusy(true);
+    try {
+      await fn({ data: form });
+      toast.success("Bursar account created");
+      setForm({ full_name: "", email: "", password: "" }); setOpen(false);
+      qc.invalidateQueries({ queryKey: ["bursars"] });
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
   }
 
   return (
-    <section>
-      <h2 className="text-xs uppercase tracking-wider text-muted-foreground mb-3">2 · Financial Rules Engine</h2>
-      <form onSubmit={onSubmit} className="card-surface p-6 grid sm:grid-cols-2 gap-4">
-        <Labeled label="Fee allocation architecture">
-          <select name="fee_structure" defaultValue={cfg?.fee_structure ?? "UNIFORM"} className="input-field">
-            <option value="UNIFORM">Uniform (same fees for all classes)</option>
-            <option value="SEGMENTED">Segmented (per-class fees)</option>
-          </select>
-        </Labeled>
-        <Labeled label="Settlement wallet / account">
-          <input name="settlement_account" defaultValue={cfg?.settlement_account ?? ""} className="input-field" placeholder="e.g. MTN MoMo 670 000 000" />
-        </Labeled>
-        <Labeled label="Admission / Base Registration Fee (XAF)">
-          <input type="number" name="uniform_registration_fee" defaultValue={cfg?.uniform_registration_fee ?? 0} className="input-field" />
-        </Labeled>
-        <Labeled label="Base Tuition Fee (XAF)">
-          <input type="number" name="uniform_tuition_fee" defaultValue={cfg?.uniform_tuition_fee ?? 0} className="input-field" />
-        </Labeled>
-        <div className="sm:col-span-2"><button className="btn-primary" disabled={save.isPending}>{save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}</button></div>
-      </form>
-    </section>
+    <div className="card-surface p-5">
+      <div className="flex items-center justify-between">
+        <div className="text-xs uppercase text-muted-foreground">Bursar accounts</div>
+        <button onClick={() => setOpen(!open)} className="btn-outline text-sm"><Plus className="h-4 w-4" /> Deploy bursar</button>
+      </div>
+      {open && (
+        <form onSubmit={submit} className="mt-4 grid sm:grid-cols-3 gap-3">
+          <input className="input-field" placeholder="Full name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required />
+          <input className="input-field" type="email" placeholder="Email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+          <input className="input-field" type="password" placeholder="Password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={6} />
+          <div className="sm:col-span-3"><button disabled={busy} className="btn-primary">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}</button></div>
+        </form>
+      )}
+      <div className="mt-4 grid gap-2">
+        {bursars.length === 0 && <div className="text-sm text-muted-foreground">No bursars yet.</div>}
+        {bursars.map((b: any) => (
+          <div key={b.user_id} className="flex justify-between text-sm border border-border rounded-lg p-3">
+            <div><div className="font-medium">{b.full_name}</div><div className="text-muted-foreground">{b.email}</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
-function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block"><span className="text-sm font-medium">{label}</span><div className="mt-1">{children}</div></label>;
-}
 
-/* ===== 3. CLASS SEGMENTS ===== */
-function ClassSegments() {
-  const list = useServerFn(listClasses);
-  const add = useServerFn(addClass);
-  const del = useServerFn(deleteClass);
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["classes-admin"], queryFn: () => list() });
-  const [name, setName] = useState("");
-  const addM = useMutation({
-    mutationFn: () => add({ data: { name } }),
-    onSuccess: () => { setName(""); toast.success("Class added"); qc.invalidateQueries({ queryKey: ["classes-admin"] }); },
-    onError: (e: any) => toast.error(e.message),
-  });
-  const delM = useMutation({
-    mutationFn: (id: string) => del({ data: { id } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["classes-admin"] }); },
-    onError: (e: any) => toast.error(e.message),
-  });
+/* ============ TAB 2 — STUDENTS INFO ============ */
+function StudentsInfoTab() {
+  const kpiFn = useServerFn(getStudentKpis);
+  const rosterFn = useServerFn(listRosterForAdmin);
+  const { data: kpis } = useQuery({ queryKey: ["kpis"], queryFn: () => kpiFn() });
+  const { data: roster } = useQuery({ queryKey: ["admin-roster"], queryFn: () => rosterFn() });
+  const [view, setView] = useState<"flat" | "segmented">("flat");
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState<any>(null);
+
+  const yearClosed = !roster?.year || roster.year.status === "CLOSED";
+  const rows = (roster?.rows ?? []) as any[];
+  const filtered = q.trim() ? rows.filter(r => r.students?.full_name?.toUpperCase().includes(q.trim().toUpperCase())) : rows;
+
+  function exportCsv() {
+    const header = "Full name,Matricule,Class,Registered,Tuition paid,Tuition required\n";
+    const body = filtered.map((r: any) => [
+      r.students?.full_name, r.students?.matricule, r.classes?.name,
+      r.is_registered ? "Yes" : "No", r.tuition_paid, r.tuition_required,
+    ].join(",")).join("\n");
+    const blob = new Blob([header + body], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "roster.csv"; a.click();
+  }
+
+  function exportPdf() {
+    const doc = new jsPDF();
+    doc.setFontSize(16); doc.text(`Roster — ${roster?.year?.label ?? ""}`, 14, 15);
+    autoTable(doc, {
+      startY: 22,
+      head: [["Name", "Matricule", "Class", "Reg.", "Paid", "Required"]],
+      body: filtered.map((r: any) => [
+        r.students?.full_name, r.students?.matricule, r.classes?.name ?? "",
+        r.is_registered ? "Yes" : "No",
+        Number(r.tuition_paid).toLocaleString(),
+        Number(r.tuition_required).toLocaleString(),
+      ]),
+    });
+    doc.save("roster.pdf");
+  }
 
   return (
-    <section>
-      <h2 className="text-xs uppercase tracking-wider text-muted-foreground mb-3">3 · Class Segments Management</h2>
-      <div className="card-surface p-6">
-        <div className="flex gap-2 flex-wrap">
-          <input className="input-field flex-1 min-w-[200px]" placeholder="Class name (e.g. Form 5)" value={name} onChange={e => setName(e.target.value)} />
-          <button className="btn-primary" disabled={!name || addM.isPending} onClick={() => addM.mutate()}>
-            <Plus className="h-4 w-4" /> Add Class
-          </button>
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Kpi label="Total students" value={kpis?.total ?? 0} sub={`${kpis?.newAdmits ?? 0} new · ${kpis?.oldStudents ?? 0} old`} />
+        <Kpi label="Registered" value={kpis?.registered ?? 0} />
+        <Kpi label="Fee started" value={kpis?.feeStarted ?? 0} />
+        <Kpi label="Fee completed" value={kpis?.feeCompleted ?? 0} />
+      </div>
+
+      <div className="card-surface p-4 flex gap-2 items-center flex-wrap">
+        <input className="input-field flex-1 min-w-[200px]" placeholder="Search by name…" value={q}
+          onChange={e => setQ(e.target.value.toUpperCase())} />
+        <div className="flex gap-1">
+          <button onClick={() => setView("flat")} className={view === "flat" ? "btn-primary text-xs" : "btn-outline text-xs"}>Flat</button>
+          <button onClick={() => setView("segmented")} className={view === "segmented" ? "btn-primary text-xs" : "btn-outline text-xs"}>By class</button>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {data?.map(c => (
-            <span key={c.id} className="inline-flex items-center gap-2 bg-muted px-3 py-1.5 rounded-full text-sm">
-              {c.name}
-              <button onClick={() => delM.mutate(c.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
-            </span>
+        <button onClick={exportCsv} className="btn-outline text-sm"><Download className="h-4 w-4" /> CSV</button>
+        <button onClick={exportPdf} className="btn-outline text-sm"><Download className="h-4 w-4" /> PDF</button>
+      </div>
+
+      {view === "flat" ? (
+        <RosterTable rows={filtered} onOpen={setSelected} yearClosed={yearClosed} />
+      ) : (
+        (() => {
+          const groups = new Map<string, any[]>();
+          for (const r of filtered) {
+            const key = r.classes?.name ?? "Unassigned";
+            const arr = groups.get(key) ?? []; arr.push(r); groups.set(key, arr);
+          }
+          return (
+            <div className="space-y-4">
+              {[...groups.entries()].map(([cls, items]) => (
+                <div key={cls}>
+                  <div className="text-xs uppercase text-muted-foreground mb-2 mt-2">{cls} ({items.length})</div>
+                  <RosterTable rows={items} onOpen={setSelected} yearClosed={yearClosed} />
+                </div>
+              ))}
+            </div>
+          );
+        })()
+      )}
+
+      {selected && <StudentProfileDialog enrollment={selected} yearClosed={yearClosed} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function Kpi({ label, value, sub }: { label: string; value: number; sub?: string }) {
+  return (
+    <div className="card-surface p-5">
+      <div className="text-xs uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 text-3xl font-display font-bold">{value}</div>
+      {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+function RosterTable({ rows, onOpen, yearClosed }: { rows: any[]; onOpen: (r: any) => void; yearClosed: boolean }) {
+  return (
+    <div className="card-surface p-5 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left text-muted-foreground border-b border-border">
+          <tr><th className="py-2">Student</th><th>Matricule</th><th>Class</th><th>Status</th>{yearClosed && <th>Promotion</th>}<th></th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r: any) => (
+            <tr key={r.id} className="border-b border-border hover:bg-muted cursor-pointer" onClick={() => onOpen(r)}>
+              <td className="py-2 font-medium">{r.students?.full_name}</td>
+              <td className="font-mono text-xs">{r.students?.matricule}</td>
+              <td>{r.classes?.name ?? "—"}</td>
+              <td>{!r.is_registered ? "Not registered" : Number(r.tuition_paid) >= Number(r.tuition_required) && Number(r.tuition_required) > 0 ? "Fully paid" : Number(r.tuition_paid) > 0 ? "Partial" : "Registered"}</td>
+              {yearClosed && <td>{r.promotion_decision ?? "—"}</td>}
+              <td className="text-right text-xs text-muted-foreground">Open →</td>
+            </tr>
           ))}
+          {rows.length === 0 && <tr><td colSpan={yearClosed ? 6 : 5} className="py-8 text-center text-muted-foreground">No students.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StudentProfileDialog({ enrollment, yearClosed, onClose }: { enrollment: any; yearClosed: boolean; onClose: () => void }) {
+  const dismissFn = useServerFn(dismissStudent);
+  const promoteFn = useServerFn(setPromotion);
+  const qc = useQueryClient();
+  const danger = useDangerConfirm();
+  const [reason, setReason] = useState("");
+  const s = enrollment.students; const c = enrollment.classes;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4" onClick={onClose}>
+        <div className="card-surface p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="font-bold text-lg">{s?.full_name}</h3>
+              <div className="text-sm text-muted-foreground">{c?.name} · <span className="font-mono">{s?.matricule}</span></div>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <InfoField k="Registered" v={enrollment.is_registered ? "Yes" : "No"} />
+            <InfoField k="Kind" v={enrollment.enrollment_kind} />
+            <InfoField k="Paid" v={`${Number(enrollment.tuition_paid).toLocaleString()} XAF`} />
+            <InfoField k="Required" v={`${Number(enrollment.tuition_required).toLocaleString()} XAF`} />
+            <InfoField k="Gender" v={s?.gender} />
+            <InfoField k="Parent phone" v={s?.parent_phone} />
+          </div>
+
+          <hr className="my-5 border-border" />
+
+          {yearClosed ? (
+            <div>
+              <div className="text-xs uppercase text-muted-foreground mb-2">Promotion decision</div>
+              <div className="flex gap-2">
+                <button onClick={async () => { await promoteFn({ data: { enrollment_id: enrollment.id, decision: "PROMOTED" } }); toast.success("Marked promoted"); qc.invalidateQueries(); onClose(); }} className="btn-primary flex-1"><ArrowUp className="h-4 w-4" /> Promote</button>
+                <button onClick={async () => { await promoteFn({ data: { enrollment_id: enrollment.id, decision: "REPEATED" } }); toast.success("Marked repeated"); qc.invalidateQueries(); onClose(); }} className="btn-outline flex-1"><RotateCcw className="h-4 w-4" /> Repeat</button>
+              </div>
+              {enrollment.promotion_decision && <div className="mt-3 text-xs text-muted-foreground">Current: {enrollment.promotion_decision}</div>}
+            </div>
+          ) : (
+            <button
+              onClick={() => danger.ask({
+                title: "Dismiss this student?",
+                message: "This removes them from the active roster for the current year. They will not appear in searches or the roster. This cannot be casually undone.",
+                confirmLabel: "Dismiss student",
+                onConfirm: async () => {
+                  if (!reason.trim() || reason.length < 3) { toast.error("Enter a reason"); throw new Error("reason"); }
+                  await dismissFn({ data: { enrollment_id: enrollment.id, reason } });
+                  toast.success("Student dismissed"); qc.invalidateQueries(); onClose();
+                },
+              })}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-destructive text-destructive px-4 py-2 font-semibold hover:bg-destructive/10">
+              <Trash2 className="h-4 w-4" /> Dismiss student
+            </button>
+          )}
+          {!yearClosed && (
+            <input className="input-field w-full mt-3" placeholder="Reason for dismissal (required)" value={reason} onChange={e => setReason(e.target.value)} />
+          )}
         </div>
       </div>
-    </section>
+      <DangerConfirm {...danger.props} />
+    </>
   );
 }
 
-/* ===== 4. BURSAR PROVISIONING ===== */
-function BursarProvisioning() {
-  const list = useServerFn(listBursars);
-  const create = useServerFn(createBursar);
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["bursars"], queryFn: () => list() });
-  const m = useMutation({
-    mutationFn: (vars: any) => create({ data: vars }),
-    onSuccess: () => { toast.success("Bursar account deployed"); qc.invalidateQueries({ queryKey: ["bursars"] }); },
-    onError: (e: any) => toast.error(e.message),
-  });
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    m.mutate({
-      full_name: String(fd.get("full_name") || ""),
-      email: String(fd.get("email") || ""),
-      password: String(fd.get("password") || ""),
-    });
-    (e.currentTarget as HTMLFormElement).reset();
-  }
+function InfoField({ k, v }: { k: string; v: any }) {
   return (
-    <section>
-      <h2 className="text-xs uppercase tracking-wider text-muted-foreground mb-3">4 · Bursar / Account Provisioning</h2>
-      <div className="card-surface p-6">
-        <form onSubmit={onSubmit} className="grid sm:grid-cols-4 gap-3">
-          <input name="full_name" required placeholder="Staff name" className="input-field" />
-          <input name="email" type="email" required placeholder="Email" className="input-field" />
-          <input name="password" type="password" required minLength={6} placeholder="Password" className="input-field" />
-          <button className="btn-primary" disabled={m.isPending}><UserPlus className="h-4 w-4" /> Deploy Account</button>
-        </form>
-        <div className="mt-5 grid gap-2">
-          {data?.length === 0 && <div className="text-sm text-muted-foreground">No bursars yet.</div>}
-          {data?.map((b: any) => (
-            <div key={b.user_id} className="flex items-center justify-between bg-muted rounded-lg px-4 py-2 text-sm">
-              <span className="font-medium">{b.full_name}</span>
-              <span className="text-muted-foreground">{b.email}</span>
+    <div className="rounded-lg bg-muted p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</div>
+      <div className="mt-0.5 text-sm">{v ?? "—"}</div>
+    </div>
+  );
+}
+
+/* ============ TAB 3 — SCHOOL YEAR ============ */
+function YearParamsTab() {
+  const fn = useServerFn(getYearParameters);
+  const closeFn = useServerFn(closeSchoolYear);
+  const qc = useQueryClient();
+  const danger = useDangerConfirm();
+  const { data, isLoading } = useQuery({ queryKey: ["year-params"], queryFn: () => fn() });
+
+  if (isLoading) return <Loader2 className="h-5 w-5 animate-spin mx-auto" />;
+
+  const year = data?.year;
+  const isOpen = year && year.status === "OPEN";
+
+  if (!isOpen) {
+    return <CreateYearWizard hasClosedPrevious={!!year} onCreated={() => { qc.invalidateQueries(); }} />;
+  }
+
+  return (
+    <>
+      <div className="space-y-5">
+        <div className="card-surface p-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="text-xs uppercase text-muted-foreground">Current school year</div>
+              <div className="mt-1 text-2xl font-display font-bold">{year.label}</div>
+              <div className="text-sm text-muted-foreground">Started {year.starts_on} · <span className="chip-success">OPEN</span></div>
+            </div>
+            <button
+              onClick={() => danger.ask({
+                title: "Close the school year?",
+                message: `This freezes the parent portal and bursar workstation for ${year.label}. Payments stop. You will then set each student's promotion decision before opening the next year. This cannot be casually undone.`,
+                confirmLabel: "Close school year",
+                onConfirm: async () => { await closeFn(); toast.success("School year closed"); qc.invalidateQueries(); },
+              })}
+              className="inline-flex items-center gap-2 rounded-lg bg-destructive text-destructive-foreground px-4 py-2 font-semibold">
+              <Lock className="h-4 w-4" /> Close school year
+            </button>
+          </div>
+        </div>
+
+        <div className="card-surface p-5">
+          <div className="text-xs uppercase text-muted-foreground mb-2">Fee configuration</div>
+          <div className="grid sm:grid-cols-2 gap-3 text-sm">
+            <InfoField k="Structure" v={data?.config?.fee_structure} />
+            <InfoField k="Currency" v={data?.config?.currency} />
+            <InfoField k="Registration (uniform)" v={`${Number(data?.config?.uniform_registration_fee ?? 0).toLocaleString()}`} />
+            <InfoField k="Tuition (uniform)" v={`${Number(data?.config?.uniform_tuition_fee ?? 0).toLocaleString()}`} />
+            <InfoField k="Min installment" v={data?.config?.min_installment_amount ? Number(data.config.min_installment_amount).toLocaleString() : "Any partial allowed"} />
+            <InfoField k="Settlement account" v={data?.config?.settlement_account} />
+          </div>
+        </div>
+
+        <div className="card-surface p-5">
+          <div className="text-xs uppercase text-muted-foreground mb-2">Levels & sub-classes</div>
+          <div className="grid gap-2">
+            {(data?.levels ?? []).map((l: any) => (
+              <div key={l.id} className="border border-border rounded-lg p-3">
+                <div className="font-semibold">{l.name}</div>
+                <div className="text-sm text-muted-foreground">
+                  {(data?.classes ?? []).filter((c: any) => c.level_id === l.id).map((c: any) => c.name).join(" · ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card-surface p-5">
+          <div className="text-xs uppercase text-muted-foreground mb-2">Admission fields</div>
+          {(data?.fields ?? []).length === 0
+            ? <div className="text-sm text-muted-foreground">No extra admission fields configured.</div>
+            : <ul className="text-sm list-disc pl-5">{(data?.fields ?? []).map((f: any) => (
+                <li key={f.id}>{f.label} <span className="text-muted-foreground">({f.data_type}{f.is_required ? " · required" : ""})</span></li>
+              ))}</ul>
+          }
+        </div>
+      </div>
+      <DangerConfirm {...danger.props} />
+    </>
+  );
+}
+
+function CreateYearWizard({ hasClosedPrevious, onCreated }: { hasClosedPrevious: boolean; onCreated: () => void }) {
+  const createFn = useServerFn(createSchoolYear);
+  const queueFn = useServerFn(listPromotionQueue);
+  const [step, setStep] = useState(1);
+  const [label, setLabel] = useState("");
+  const [starts, setStarts] = useState(new Date().toISOString().slice(0, 10));
+  const [levels, setLevels] = useState<{ name: string; sort_order: number; subclasses: string[] }[]>([
+    { name: "Form 1", sort_order: 1, subclasses: ["Form 1 A"] },
+  ]);
+  const [fee, setFee] = useState({
+    fee_structure: "UNIFORM" as "UNIFORM" | "SEGMENTED",
+    currency: "XAF",
+    uniform_registration_fee: 25000,
+    uniform_tuition_fee: 150000,
+    settlement_account: "",
+    min_installment_amount: "" as string | number,
+  });
+  const [fields, setFields] = useState<{ label: string; data_type: any; is_required: boolean; sort_order: number; options?: string[] }[]>([]);
+  const [rollForward, setRollForward] = useState(hasClosedPrevious);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!label.trim()) return toast.error("Enter a year label");
+    if (levels.some(l => !l.name || l.subclasses.length === 0 || l.subclasses.some(s => !s.trim())))
+      return toast.error("All levels need a name and at least one sub-class");
+    setBusy(true);
+    try {
+      await createFn({ data: {
+        label, starts_on: starts, levels,
+        fee_config: {
+          fee_structure: fee.fee_structure, currency: fee.currency,
+          uniform_registration_fee: Number(fee.uniform_registration_fee),
+          uniform_tuition_fee: Number(fee.uniform_tuition_fee),
+          settlement_account: fee.settlement_account || null,
+          min_installment_amount: fee.min_installment_amount === "" ? null : Number(fee.min_installment_amount),
+        },
+        admission_fields: fields.map((f, i) => ({ ...f, sort_order: i + 1, options: f.options ?? null })),
+        roll_forward: rollForward,
+      }});
+      toast.success("School year created");
+      onCreated();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card-surface p-6">
+      <div className="text-xs uppercase text-muted-foreground">Create school year — step {step} of {hasClosedPrevious ? 6 : 5}</div>
+
+      {step === 1 && (
+        <div className="mt-4 grid sm:grid-cols-2 gap-4">
+          <label><span className="text-sm font-medium">Year label</span>
+            <input className="input-field w-full mt-1" placeholder="2027/2028" value={label} onChange={e => setLabel(e.target.value)} /></label>
+          <label><span className="text-sm font-medium">Start date</span>
+            <input type="date" className="input-field w-full mt-1" value={starts} onChange={e => setStarts(e.target.value)} /></label>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="mt-4 space-y-3">
+          <div className="text-sm text-muted-foreground">Add class levels in ascending order (Form 1, Form 2, …).</div>
+          {levels.map((l, i) => (
+            <div key={i} className="border border-border rounded-lg p-3 grid sm:grid-cols-[1fr_auto] gap-2 items-center">
+              <input className="input-field" value={l.name} onChange={e => {
+                const cp = [...levels]; cp[i].name = e.target.value; setLevels(cp);
+              }} placeholder="Level name" />
+              <button onClick={() => setLevels(levels.filter((_, j) => j !== i))} className="btn-ghost text-destructive"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          ))}
+          <button onClick={() => setLevels([...levels, { name: "", sort_order: levels.length + 1, subclasses: [""] }])} className="btn-outline text-sm"><Plus className="h-4 w-4" /> Add level</button>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="mt-4 space-y-3">
+          <div className="text-sm text-muted-foreground">Add sub-classes (e.g. Form 1 A, Form 1 B) under each level.</div>
+          {levels.map((l, i) => (
+            <div key={i} className="border border-border rounded-lg p-3">
+              <div className="font-semibold text-sm mb-2">{l.name || `Level ${i + 1}`}</div>
+              {l.subclasses.map((s, j) => (
+                <div key={j} className="flex gap-2 mb-2">
+                  <input className="input-field flex-1" value={s} onChange={e => {
+                    const cp = [...levels]; cp[i].subclasses[j] = e.target.value; setLevels(cp);
+                  }} placeholder={`${l.name} A`} />
+                  <button onClick={() => {
+                    const cp = [...levels]; cp[i].subclasses = cp[i].subclasses.filter((_, k) => k !== j); setLevels(cp);
+                  }} className="btn-ghost text-destructive"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              ))}
+              <button onClick={() => { const cp = [...levels]; cp[i].subclasses.push(""); setLevels(cp); }} className="btn-outline text-xs"><Plus className="h-3 w-3" /> Sub-class</button>
             </div>
           ))}
         </div>
-      </div>
-    </section>
-  );
-}
+      )}
 
-/* ===== 5. SEGMENTED STUDENT LEDGER ===== */
-function StudentLedger() {
-  const listC = useServerFn(listClasses);
-  const listS = useServerFn(listStudentLedger);
-  const { data: classes } = useQuery({ queryKey: ["classes-admin"], queryFn: () => listC() });
-  const [classId, setClassId] = useState<string | null>(null);
-  const { data: rows } = useQuery({
-    queryKey: ["ledger", classId],
-    queryFn: () => listS({ data: { class_id: classId } }),
-  });
+      {step === 4 && (
+        <div className="mt-4 grid sm:grid-cols-2 gap-3">
+          <label className="sm:col-span-2"><span className="text-sm font-medium">Fee structure</span>
+            <select className="input-field w-full mt-1" value={fee.fee_structure} onChange={e => setFee({ ...fee, fee_structure: e.target.value as any })}>
+              <option value="UNIFORM">Uniform (one fee across the school)</option>
+              <option value="SEGMENTED">Segmented (per level — set later)</option>
+            </select></label>
+          <label><span className="text-sm font-medium">Registration fee</span>
+            <input type="number" className="input-field w-full mt-1" value={fee.uniform_registration_fee} onChange={e => setFee({ ...fee, uniform_registration_fee: Number(e.target.value) })} /></label>
+          <label><span className="text-sm font-medium">Tuition fee</span>
+            <input type="number" className="input-field w-full mt-1" value={fee.uniform_tuition_fee} onChange={e => setFee({ ...fee, uniform_tuition_fee: Number(e.target.value) })} /></label>
+          <label><span className="text-sm font-medium">Currency</span>
+            <input className="input-field w-full mt-1" value={fee.currency} onChange={e => setFee({ ...fee, currency: e.target.value })} /></label>
+          <label><span className="text-sm font-medium">Settlement account</span>
+            <input className="input-field w-full mt-1" value={fee.settlement_account} onChange={e => setFee({ ...fee, settlement_account: e.target.value })} placeholder="MTN MoMo · 6XX…" /></label>
+          <label className="sm:col-span-2"><span className="text-sm font-medium">Minimum tuition installment (blank = any partial allowed)</span>
+            <input type="number" className="input-field w-full mt-1" value={fee.min_installment_amount} onChange={e => setFee({ ...fee, min_installment_amount: e.target.value })} placeholder="e.g. 25000" /></label>
+        </div>
+      )}
 
-  function exportCsv() {
-    const header = ["Matricule","Full Name","Class","Verification","Tuition Paid (XAF)"];
-    const body = (rows ?? []).map((r: any) => [
-      r.matricule ?? "", r.full_name, r.classes?.name ?? "",
-      r.application_status, Number(r.tuition_paid).toString(),
-    ]);
-    const csv = [header, ...body].map(r => r.map(c => `"${String(c).replaceAll('"','""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "student-ledger.csv"; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <section>
-      <h2 className="text-xs uppercase tracking-wider text-muted-foreground mb-3">5 · Segmented Student Ledger</h2>
-      <div className="card-surface p-6">
-        <div className="flex flex-wrap gap-2 items-center">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          <button onClick={() => setClassId(null)} className={"px-3 py-1.5 rounded-full text-sm font-medium " + (classId === null ? "bg-primary text-primary-foreground" : "bg-muted")}>All</button>
-          {classes?.map(c => (
-            <button key={c.id} onClick={() => setClassId(c.id)}
-              className={"px-3 py-1.5 rounded-full text-sm font-medium " + (classId === c.id ? "bg-primary text-primary-foreground" : "bg-muted")}>
-              {c.name}
-            </button>
+      {step === 5 && (
+        <div className="mt-4 space-y-3">
+          <div className="text-sm text-muted-foreground">Extra admission questions. Core fields (name, gender, DOB, place of birth, parent phone, class) are always captured.</div>
+          {fields.map((f, i) => (
+            <div key={i} className="border border-border rounded-lg p-3 grid sm:grid-cols-4 gap-2 items-end">
+              <label className="sm:col-span-2"><span className="text-xs">Label</span>
+                <input className="input-field w-full mt-1" value={f.label} onChange={e => {
+                  const cp = [...fields]; cp[i].label = e.target.value; setFields(cp);
+                }} /></label>
+              <label><span className="text-xs">Type</span>
+                <select className="input-field w-full mt-1" value={f.data_type} onChange={e => {
+                  const cp = [...fields]; cp[i].data_type = e.target.value; setFields(cp);
+                }}>
+                  <option value="TEXT">Text</option><option value="NUMBER">Number</option>
+                  <option value="DATE">Date</option><option value="BOOLEAN">Yes/No</option>
+                  <option value="SELECT">Select</option>
+                </select></label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={f.is_required} onChange={e => {
+                const cp = [...fields]; cp[i].is_required = e.target.checked; setFields(cp);
+              }} /> <span className="text-xs">Required</span></label>
+              {f.data_type === "SELECT" && (
+                <label className="sm:col-span-4"><span className="text-xs">Options (comma-separated)</span>
+                  <input className="input-field w-full mt-1" value={(f.options ?? []).join(", ")} onChange={e => {
+                    const cp = [...fields]; cp[i].options = e.target.value.split(",").map(s => s.trim()).filter(Boolean); setFields(cp);
+                  }} /></label>
+              )}
+              <button onClick={() => setFields(fields.filter((_, j) => j !== i))} className="btn-ghost text-destructive sm:col-span-4"><Trash2 className="h-4 w-4" /> Remove</button>
+            </div>
           ))}
-          <div className="flex-1" />
-          <button onClick={exportCsv} className="btn-outline text-sm"><Download className="h-4 w-4" /> Master Export</button>
+          <button onClick={() => setFields([...fields, { label: "", data_type: "TEXT", is_required: false, sort_order: fields.length + 1 }])} className="btn-outline text-sm"><Plus className="h-4 w-4" /> Add field</button>
         </div>
+      )}
 
-        <div className="overflow-x-auto mt-5">
-          <table className="w-full text-sm">
-            <thead className="text-left text-muted-foreground border-b border-border">
-              <tr><th className="py-2">Matricule</th><th>Student</th><th>Class</th><th>Verification</th><th className="text-right">Tuition Paid</th></tr>
-            </thead>
-            <tbody>
-              {rows?.map((r: any) => (
-                <tr key={r.id} className="border-b border-border">
-                  <td className="py-2 font-mono text-xs">{r.matricule ?? "—"}</td>
-                  <td>{r.full_name}</td>
-                  <td>{r.classes?.name ?? "—"}</td>
-                  <td>
-                    <span className={r.application_status === "APPROVED" ? "chip-success" : r.application_status === "REJECTED" ? "chip-danger" : "chip-warning"}>
-                      {r.application_status.replace("_"," ")}
-                    </span>
-                  </td>
-                  <td className="text-right font-mono">{Number(r.tuition_paid).toLocaleString()}</td>
-                </tr>
-              ))}
-              {(!rows || rows.length === 0) && <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">No students.</td></tr>}
-            </tbody>
-          </table>
+      {step === 6 && hasClosedPrevious && (
+        <div className="mt-4">
+          <label className="flex items-start gap-3 border border-border rounded-lg p-4">
+            <input type="checkbox" className="mt-1" checked={rollForward} onChange={e => setRollForward(e.target.checked)} />
+            <div>
+              <div className="font-semibold text-sm">Roll students forward from last year</div>
+              <div className="text-xs text-muted-foreground mt-1">Non-dismissed students with a Promote/Repeat decision from the previous closed year will be enrolled into this new year automatically. They will need to register and pay again.</div>
+            </div>
+          </label>
         </div>
+      )}
+
+      <div className="mt-6 flex justify-between">
+        <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1} className="btn-ghost">Back</button>
+        {step < (hasClosedPrevious ? 6 : 5) ? (
+          <button onClick={() => setStep(step + 1)} className="btn-primary">Next</button>
+        ) : (
+          <button onClick={submit} disabled={busy} className="btn-primary">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create school year"}
+          </button>
+        )}
       </div>
-    </section>
+    </div>
   );
 }

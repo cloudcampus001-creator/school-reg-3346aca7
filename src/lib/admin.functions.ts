@@ -3,25 +3,29 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
 export const DEMO_SCHOOL_ID = "11111111-1111-1111-1111-111111111111";
+export const DEMO_SCHOOL_SLUG = "DEMO";
 
 async function ensureAdmin(userId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin
-    .from("user_roles").select("role").eq("user_id", userId).eq("role", "admin").maybeSingle();
-  if (error) throw new Error(error.message);
+  const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId).eq("role", "admin").maybeSingle();
   if (!data) throw new Error("Forbidden: admin role required");
 }
 
-// Current user's role (admin | bursar | null) — used by UI to route
+async function currentYear() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("school_years").select("*").eq("school_id", DEMO_SCHOOL_ID)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return data;
+}
+
+// ---- Role identity ----
 export const getMyRole = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data } = await supabaseAdmin
-      .from("user_roles").select("role, full_name")
+    const { data } = await supabaseAdmin.from("user_roles").select("role, full_name")
       .eq("user_id", context.userId).limit(1).maybeSingle();
-    const { count } = await supabaseAdmin
-      .from("user_roles").select("*", { count: "exact", head: true }).eq("role", "admin");
+    const { count } = await supabaseAdmin.from("user_roles").select("*", { count: "exact", head: true }).eq("role", "admin");
     return {
       role: (data?.role ?? null) as "admin" | "bursar" | null,
       full_name: data?.full_name ?? null,
@@ -29,13 +33,11 @@ export const getMyRole = createServerFn({ method: "GET" })
     };
   });
 
-// First-admin self-grant
 export const claimAdminIfNone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { count } = await supabaseAdmin
-      .from("user_roles").select("*", { count: "exact", head: true }).eq("role", "admin");
+    const { count } = await supabaseAdmin.from("user_roles").select("*", { count: "exact", head: true }).eq("role", "admin");
     if ((count ?? 0) > 0) throw new Error("An admin already exists.");
     const { error } = await supabaseAdmin.from("user_roles").insert({
       user_id: context.userId, role: "admin", school_id: DEMO_SCHOOL_ID, full_name: "School Administrator",
@@ -44,108 +46,173 @@ export const claimAdminIfNone = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// ============ DASHBOARD SUMMARY ============
-export const getAdminOverview = createServerFn({ method: "GET" })
+// ---- School info tab ----
+export const getRevenueBreakdown = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context.userId);
+    const year = await currentYear();
+    if (!year) return { total: 0, breakdown: [] };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const [txRes, studentsRes] = await Promise.all([
-      supabaseAdmin.from("financial_transactions").select("amount").eq("school_id", DEMO_SCHOOL_ID),
-      supabaseAdmin.from("students").select("application_status, is_registered").eq("school_id", DEMO_SCHOOL_ID),
-    ]);
-    const tx = txRes.data ?? [];
-    const students = studentsRes.data ?? [];
+    const { data: enrollments } = await supabaseAdmin.from("student_enrollments").select("id").eq("school_year_id", year.id);
+    const ids = (enrollments ?? []).map(e => e.id);
+    if (!ids.length) return { total: 0, breakdown: [] };
+    const { data: tx } = await supabaseAdmin.from("financial_transactions")
+      .select("amount, payment_method").in("enrollment_id", ids);
+    const rows = tx ?? [];
+    const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+    const groups: Record<string, number> = { MOBILE_MONEY: 0, CASH: 0, BANK: 0 };
+    for (const r of rows) {
+      if (r.payment_method === "MTN_MOMO" || r.payment_method === "ORANGE_MONEY") groups.MOBILE_MONEY += Number(r.amount);
+      else if (r.payment_method === "CASH") groups.CASH += Number(r.amount);
+      else if (r.payment_method === "BANK") groups.BANK += Number(r.amount);
+    }
+    const breakdown = Object.entries(groups).map(([key, amt]) => ({
+      key, amount: amt, pct: total ? Math.round((amt / total) * 1000) / 10 : 0,
+    }));
+    return { total, breakdown };
+  });
+
+// ---- Students info tab ----
+export const getStudentKpis = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await ensureAdmin(context.userId);
+    const year = await currentYear();
+    if (!year) return { total: 0, newAdmits: 0, oldStudents: 0, registered: 0, feeStarted: 0, feeCompleted: 0 };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data } = await supabaseAdmin.from("student_enrollments")
+      .select("enrollment_kind, is_registered, tuition_paid, tuition_required")
+      .eq("school_year_id", year.id).eq("dismissed", false);
+    const rows = data ?? [];
     return {
-      grossRevenue: tx.reduce((s, t) => s + Number(t.amount), 0),
-      registeredActive: students.filter(s => s.is_registered).length,
-      pendingAction: students.filter(s => s.application_status === "PENDING_REVIEW").length,
-      totalStudents: students.length,
+      total: rows.length,
+      newAdmits: rows.filter(r => r.enrollment_kind === "NEW_ADMIT").length,
+      oldStudents: rows.filter(r => r.enrollment_kind === "OLD_STUDENT").length,
+      registered: rows.filter(r => r.is_registered).length,
+      feeStarted: rows.filter(r => r.is_registered && Number(r.tuition_paid) > 0 && Number(r.tuition_paid) < Number(r.tuition_required)).length,
+      feeCompleted: rows.filter(r => r.is_registered && Number(r.tuition_paid) >= Number(r.tuition_required) && Number(r.tuition_required) > 0).length,
     };
   });
 
-// ============ FINANCIAL RULES ENGINE ============
-export const getSchoolConfig = createServerFn({ method: "GET" })
+export const dismissStudent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ enrollment_id: z.string().uuid(), reason: z.string().trim().min(3).max(300) }).parse(d))
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.rpc("dismiss_student", { _enrollment_id: data.enrollment_id, _reason: data.reason });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const setPromotion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ enrollment_id: z.string().uuid(), decision: z.enum(["PROMOTED", "REPEATED"]) }).parse(d))
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.rpc("set_promotion", { _enrollment_id: data.enrollment_id, _decision: data.decision });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ---- Year lifecycle ----
+export const getYearParameters = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await ensureAdmin(context.userId);
+    const year = await currentYear();
+    if (!year) return { year: null, hasClosedPrevious: false };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const [levelsRes, classesRes, fieldsRes, cfgRes, prevRes] = await Promise.all([
+      supabaseAdmin.from("class_levels").select("*").eq("school_year_id", year.id).order("sort_order"),
+      supabaseAdmin.from("classes").select("*").eq("school_year_id", year.id).order("sort_order"),
+      supabaseAdmin.from("admission_field_defs").select("*").eq("school_year_id", year.id).order("sort_order"),
+      supabaseAdmin.from("school_configs").select("*").eq("school_year_id", year.id).maybeSingle(),
+      supabaseAdmin.from("school_years").select("id").eq("school_id", DEMO_SCHOOL_ID).eq("status", "CLOSED").limit(1),
+    ]);
+    return {
+      year, levels: levelsRes.data ?? [], classes: classesRes.data ?? [],
+      fields: fieldsRes.data ?? [], config: cfgRes.data,
+      hasClosedPrevious: (prevRes.data ?? []).length > 0,
+    };
+  });
+
+export const closeSchoolYear = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
-      .from("school_configs").select("*").eq("school_id", DEMO_SCHOOL_ID).maybeSingle();
+    const { error } = await supabaseAdmin.rpc("close_school_year", { _school_id: DEMO_SCHOOL_ID });
     if (error) throw new Error(error.message);
-    return data;
+    return { ok: true };
   });
 
-export const updateSchoolConfig = createServerFn({ method: "POST" })
+// Promotion queue — students from most recent closed year that need a decision or already have one
+export const listPromotionQueue = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await ensureAdmin(context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: closed } = await supabaseAdmin.from("school_years").select("id, label")
+      .eq("school_id", DEMO_SCHOOL_ID).eq("status", "CLOSED")
+      .order("closed_at", { ascending: false }).limit(1).maybeSingle();
+    if (!closed) return { year: null, rows: [] };
+    const { data } = await supabaseAdmin.from("student_enrollments")
+      .select(`id, promotion_decision, dismissed, students(full_name, matricule),
+        classes(name, class_levels(name, sort_order))`)
+      .eq("school_year_id", closed.id).eq("dismissed", false);
+    return { year: closed, rows: data ?? [] };
+  });
+
+export const createSchoolYear = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({
-    fee_structure: z.enum(["UNIFORM", "SEGMENTED"]),
-    uniform_registration_fee: z.number().min(0),
-    uniform_tuition_fee: z.number().min(0),
-    settlement_account: z.string().trim().max(120).nullable().optional(),
+    label: z.string().trim().min(4).max(20),
+    starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    levels: z.array(z.object({
+      name: z.string().trim().min(1).max(60),
+      sort_order: z.number().int(),
+      subclasses: z.array(z.string().trim().min(1).max(60)).min(1),
+    })).min(1),
+    fee_config: z.object({
+      fee_structure: z.enum(["UNIFORM", "SEGMENTED"]),
+      currency: z.string().default("XAF"),
+      uniform_registration_fee: z.number().nonnegative(),
+      uniform_tuition_fee: z.number().nonnegative(),
+      settlement_account: z.string().max(120).optional().nullable(),
+      min_installment_amount: z.number().nonnegative().nullable().optional(),
+      segmented: z.array(z.object({
+        level_name: z.string(), registration: z.number().nonnegative(), tuition: z.number().nonnegative(),
+      })).optional(),
+    }),
+    admission_fields: z.array(z.object({
+      label: z.string().trim().min(1).max(80),
+      data_type: z.enum(["TEXT", "NUMBER", "DATE", "BOOLEAN", "SELECT"]),
+      options: z.array(z.string()).optional().nullable(),
+      is_required: z.boolean(),
+      sort_order: z.number().int(),
+    })).default([]),
+    roll_forward: z.boolean().default(false),
   }).parse(d))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("school_configs").update({
-      fee_structure: data.fee_structure,
-      uniform_registration_fee: data.uniform_registration_fee,
-      uniform_tuition_fee: data.uniform_tuition_fee,
-      settlement_account: data.settlement_account ?? null,
-    }).eq("school_id", DEMO_SCHOOL_ID);
+    const payload = { ...data, school_id: DEMO_SCHOOL_ID };
+    const { data: yid, error } = await supabaseAdmin.rpc("create_school_year", { _payload: payload as any });
     if (error) throw new Error(error.message);
-    return { ok: true };
+    return { year_id: yid as unknown as string };
   });
 
-// ============ CLASSES ============
-export const listClasses = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await ensureAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin.from("classes")
-      .select("id, name, sort_order").eq("school_id", DEMO_SCHOOL_ID).order("sort_order");
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  });
-
-export const addClass = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ name: z.string().trim().min(1).max(60) }).parse(d))
-  .handler(async ({ context, data }) => {
-    await ensureAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: maxRow } = await supabaseAdmin.from("classes")
-      .select("sort_order").eq("school_id", DEMO_SCHOOL_ID).order("sort_order", { ascending: false }).limit(1).maybeSingle();
-    const next = (maxRow?.sort_order ?? 0) + 1;
-    const { error } = await supabaseAdmin.from("classes")
-      .insert({ school_id: DEMO_SCHOOL_ID, name: data.name, sort_order: next });
-    if (error) throw new Error(error.message);
-    return { ok: true };
-  });
-
-export const deleteClass = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ context, data }) => {
-    await ensureAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("classes").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
-    return { ok: true };
-  });
-
-// ============ BURSAR PROVISIONING ============
+// Bursar provisioning (kept from previous impl)
 export const listBursars = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin.from("user_roles")
-      .select("user_id, full_name, created_at").eq("role", "bursar").eq("school_id", DEMO_SCHOOL_ID)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    // also fetch emails via admin api
+    const { data } = await supabaseAdmin.from("user_roles").select("user_id, full_name, created_at")
+      .eq("role", "bursar").eq("school_id", DEMO_SCHOOL_ID).order("created_at", { ascending: false });
     const enriched: any[] = [];
     for (const r of data ?? []) {
       const { data: u } = await supabaseAdmin.auth.admin.getUserById(r.user_id);
@@ -177,18 +244,19 @@ export const createBursar = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// ============ STUDENT LEDGER ============
-export const listStudentLedger = createServerFn({ method: "GET" })
+// Roster + full profile for admin (view-only)
+export const listRosterForAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ class_id: z.string().uuid().nullable().optional() }).parse(d))
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context }) => {
     await ensureAdmin(context.userId);
+    const year = await currentYear();
+    if (!year) return { year: null, rows: [] };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let q = supabaseAdmin.from("students")
-      .select("id, full_name, matricule, application_status, is_registered, tuition_paid, class_id, classes(name)")
-      .eq("school_id", DEMO_SCHOOL_ID).order("created_at", { ascending: false });
-    if (data.class_id) q = q.eq("class_id", data.class_id);
-    const { data: rows, error } = await q;
-    if (error) throw new Error(error.message);
-    return rows ?? [];
+    const { data } = await supabaseAdmin.from("student_enrollments")
+      .select(`id, is_registered, tuition_required, tuition_paid, dismissed, enrollment_kind, promotion_decision,
+        students(id, full_name, matricule, parent_phone, gender),
+        classes(id, name, level_id, class_levels(name, sort_order))`)
+      .eq("school_year_id", year.id).eq("dismissed", false)
+      .order("created_at", { ascending: false });
+    return { year, rows: data ?? [] };
   });

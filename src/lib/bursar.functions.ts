@@ -7,115 +7,134 @@ export const DEMO_SCHOOL_SLUG = "DEMO";
 
 async function ensureStaff(userId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin
-    .from("user_roles").select("role").eq("user_id", userId).in("role", ["admin", "bursar"]).maybeSingle();
-  if (error) throw new Error(error.message);
+  const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId).in("role", ["admin", "bursar"]).maybeSingle();
   if (!data) throw new Error("Forbidden: staff role required");
   return data.role as "admin" | "bursar";
 }
 
-// Search by matricule
-export const searchByMatricule = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ matricule: z.string().trim().min(1) }).parse(d))
-  .handler(async ({ context, data }) => {
-    await ensureStaff(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row, error } = await supabaseAdmin.from("students")
-      .select("id, full_name, matricule, application_status, is_registered, tuition_paid, gender, date_of_birth, parent_phone, classes(name)")
-      .ilike("matricule", `%${data.matricule}%`).limit(1).maybeSingle();
-    if (error) throw new Error(error.message);
-    return row;
-  });
+async function currentYear() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("school_years").select("*").eq("school_id", DEMO_SCHOOL_ID)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return data;
+}
 
-// Pending approvals
-export const listPendingApprovals = createServerFn({ method: "GET" })
+// Admission form schema
+export const getAdmissionSchema = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureStaff(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin.from("students")
-      .select("id, full_name, gender, date_of_birth, parent_phone, created_at, classes(name)")
-      .eq("school_id", DEMO_SCHOOL_ID).eq("application_status", "PENDING_REVIEW")
-      .order("created_at", { ascending: true });
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    const year = await currentYear();
+    if (!year) return { year: null, levels: [], classes: [], fields: [] };
+    const [levelsRes, classesRes, fieldsRes, cfgRes] = await Promise.all([
+      supabaseAdmin.from("class_levels").select("id, name, sort_order").eq("school_year_id", year.id).order("sort_order"),
+      supabaseAdmin.from("classes").select("id, name, level_id, sort_order").eq("school_year_id", year.id).order("sort_order"),
+      supabaseAdmin.from("admission_field_defs").select("*").eq("school_year_id", year.id).order("sort_order"),
+      supabaseAdmin.from("school_configs").select("*").eq("school_year_id", year.id).maybeSingle(),
+    ]);
+    return { year, levels: levelsRes.data ?? [], classes: classesRes.data ?? [], fields: fieldsRes.data ?? [], config: cfgRes.data };
   });
 
-// Approved but not yet registered (awaiting registration payment)
-export const listAwaitingPayment = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await ensureStaff(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin.from("students")
-      .select("id, full_name, parent_phone, classes(name)")
-      .eq("school_id", DEMO_SCHOOL_ID).eq("application_status", "APPROVED").eq("is_registered", false)
-      .order("updated_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  });
-
-// Approve / Reject
-export const decideApplication = createServerFn({ method: "POST" })
+// Admit a new student (creates student + enrollment + matricule)
+export const admitStudent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({
-    student_id: z.string().uuid(),
-    status: z.enum(["APPROVED", "REJECTED"]),
+    full_name: z.string().trim().min(2).max(120),
+    gender: z.enum(["MALE", "FEMALE", "OTHER"]),
+    date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    place_of_birth: z.string().trim().max(120).optional().nullable(),
+    parent_phone: z.string().trim().min(6).max(30),
+    class_id: z.string().uuid(),
+    extra_fields: z.record(z.any()).optional(),
   }).parse(d))
   .handler(async ({ context, data }) => {
     await ensureStaff(context.userId);
+    const year = await currentYear();
+    if (!year || year.status !== "OPEN") throw new Error("No open school year");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("students")
-      .update({ application_status: data.status }).eq("id", data.student_id);
+    const { data: enrollmentId, error } = await supabaseAdmin.rpc("admit_student", {
+      _school_id: DEMO_SCHOOL_ID, _school_slug: DEMO_SCHOOL_SLUG,
+      _full_name: data.full_name, _gender: data.gender, _dob: data.date_of_birth,
+      _place: data.place_of_birth ?? "", _phone: data.parent_phone,
+      _class_id: data.class_id, _extra: data.extra_fields ?? {},
+    });
     if (error) throw new Error(error.message);
-    return { ok: true };
+    return { enrollment_id: enrollmentId as unknown as string };
   });
 
-// Record payment (simulated). Used by bursar (and parent via portal.functions).
-export const recordPayment = createServerFn({ method: "POST" })
+// Roster
+export const listRoster = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await ensureStaff(context.userId);
+    const year = await currentYear();
+    if (!year) return { year: null, rows: [] };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin.from("student_enrollments")
+      .select(`id, is_registered, tuition_required, tuition_paid, dismissed, enrollment_kind, class_id,
+        students(id, full_name, matricule, parent_phone, gender),
+        classes(id, name, level_id, class_levels(name, sort_order))`)
+      .eq("school_year_id", year.id).eq("dismissed", false)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return { year, rows: data ?? [] };
+  });
+
+// Smart search — same as portal but staff-restricted
+export const staffSearch = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ q: z.string().trim().max(120) }).parse(d))
+  .handler(async ({ context, data }) => {
+    await ensureStaff(context.userId);
+    const year = await currentYear();
+    if (!year) return [];
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin.rpc("search_students", {
+      _school_id: DEMO_SCHOOL_ID, _year_id: year.id, _q: data.q,
+    });
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
+
+// Bursar cash/bank payment
+export const bursarPay = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({
-    student_id: z.string().uuid(),
+    enrollment_id: z.string().uuid(),
     type: z.enum(["REGISTRATION", "TUITION"]),
     amount: z.number().positive(),
-    payment_method: z.enum(["CASH", "MTN_MOMO", "ORANGE_MONEY", "BANK"]),
-    payment_phone: z.string().trim().max(40).optional(),
+    payment_method: z.enum(["CASH", "BANK"]),
   }).parse(d))
   .handler(async ({ context, data }) => {
     await ensureStaff(context.userId);
-    return await performPayment(data);
-  });
-
-// Recent settlements
-export const listSettlements = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await ensureStaff(context.userId);
+    const year = await currentYear();
+    if (!year || year.status !== "OPEN") throw new Error("School year is closed");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin.from("financial_transactions")
-      .select("id, amount, type, payment_method, reference, created_at, students(full_name, matricule, classes(name))")
-      .eq("school_id", DEMO_SCHOOL_ID).order("created_at", { ascending: false }).limit(100);
+    const { data: res, error } = await supabaseAdmin.rpc("record_payment", {
+      _enrollment_id: data.enrollment_id, _type: data.type, _amount: data.amount,
+      _method: data.payment_method, _phone: "",
+    });
     if (error) throw new Error(error.message);
-    return data ?? [];
+    const row = Array.isArray(res) ? res[0] : res;
+    return { transaction_id: (row as any).transaction_id, reference: (row as any).reference };
   });
 
-// Counters for the dashboard
-export const getBursarCounters = createServerFn({ method: "GET" })
+// Enrollment profile (server-side for staff — includes richer info)
+export const getEnrollment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d) => z.object({ enrollment_id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
     await ensureStaff(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const [pending, awaiting] = await Promise.all([
-      supabaseAdmin.from("students").select("*", { count: "exact", head: true })
-        .eq("school_id", DEMO_SCHOOL_ID).eq("application_status", "PENDING_REVIEW"),
-      supabaseAdmin.from("students").select("*", { count: "exact", head: true })
-        .eq("school_id", DEMO_SCHOOL_ID).eq("application_status", "APPROVED").eq("is_registered", false),
-    ]);
-    return { pending: pending.count ?? 0, awaiting: awaiting.count ?? 0 };
+    const { data: enr, error } = await supabaseAdmin.from("student_enrollments")
+      .select(`*, students(*), classes(id, name, level_id, class_levels(name))`)
+      .eq("id", data.enrollment_id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return enr;
   });
 
-// Get receipt content for reprint
+// Get transaction for reprint
 export const getReceipt = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ transaction_id: z.string().uuid() }).parse(d))
@@ -123,52 +142,9 @@ export const getReceipt = createServerFn({ method: "GET" })
     await ensureStaff(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: tx, error } = await supabaseAdmin.from("financial_transactions")
-      .select("id, amount, type, payment_method, reference, created_at, payment_phone, students(full_name, matricule, classes(name))")
+      .select("id, amount, type, payment_method, reference, created_at, payment_phone, students(full_name, matricule)")
       .eq("id", data.transaction_id).maybeSingle();
     if (error) throw new Error(error.message);
     if (!tx) throw new Error("Transaction not found");
     return tx;
   });
-
-// Shared payment logic — also called from portal (parent-initiated)
-export async function performPayment(data: {
-  student_id: string;
-  type: "REGISTRATION" | "TUITION";
-  amount: number;
-  payment_method: "CASH" | "MTN_MOMO" | "ORANGE_MONEY" | "BANK";
-  payment_phone?: string;
-}) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-  const { data: student, error: sErr } = await supabaseAdmin
-    .from("students").select("*, classes(name)").eq("id", data.student_id).maybeSingle();
-  if (sErr) throw new Error(sErr.message);
-  if (!student) throw new Error("Student not found");
-  if (student.application_status !== "APPROVED")
-    throw new Error("Application must be approved before payment");
-
-  const reference = "TX-" + Math.random().toString(36).slice(2, 10).toUpperCase();
-  const { data: tx, error: tErr } = await supabaseAdmin
-    .from("financial_transactions").insert({
-      school_id: DEMO_SCHOOL_ID, student_id: data.student_id,
-      amount: data.amount, type: data.type,
-      payment_method: data.payment_method,
-      payment_phone: data.payment_phone ?? null,
-      status: "SUCCESS", reference,
-    }).select("id").single();
-  if (tErr) throw new Error(tErr.message);
-
-  if (data.type === "REGISTRATION" && !student.is_registered) {
-    const { data: matRes, error: mErr } = await supabaseAdmin
-      .rpc("generate_matricule", { _school_slug: DEMO_SCHOOL_SLUG });
-    if (mErr) throw new Error(mErr.message);
-    await supabaseAdmin.from("students").update({
-      is_registered: true, matricule: matRes as unknown as string,
-    }).eq("id", data.student_id);
-  } else if (data.type === "TUITION") {
-    const newPaid = Number(student.tuition_paid) + data.amount;
-    await supabaseAdmin.from("students").update({ tuition_paid: newPaid }).eq("id", data.student_id);
-  }
-
-  return { transaction_id: tx.id, reference };
-}
