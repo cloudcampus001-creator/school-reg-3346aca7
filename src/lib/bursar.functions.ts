@@ -120,7 +120,7 @@ export const bursarPay = createServerFn({ method: "POST" })
     return { transaction_id: (row as any).transaction_id, reference: (row as any).reference };
   });
 
-// Enrollment profile (server-side for staff — includes richer info)
+// Enrollment profile (server-side for staff — includes richer info + admission field defs)
 export const getEnrollment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ enrollment_id: z.string().uuid() }).parse(d))
@@ -131,7 +131,10 @@ export const getEnrollment = createServerFn({ method: "POST" })
       .select(`*, students(*), classes(id, name, level_id, class_levels(name))`)
       .eq("id", data.enrollment_id).maybeSingle();
     if (error) throw new Error(error.message);
-    return enr;
+    if (!enr) return null;
+    const { data: fields } = await supabaseAdmin.from("admission_field_defs")
+      .select("*").eq("school_year_id", (enr as any).school_year_id).order("sort_order");
+    return { ...enr, fields: fields ?? [] } as any;
   });
 
 // Get transaction for reprint
