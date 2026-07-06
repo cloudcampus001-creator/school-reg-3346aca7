@@ -16,6 +16,7 @@ import {
   dismissStudent, setPromotion, getYearParameters, closeSchoolYear, createSchoolYear,
   listPromotionQueue, listBursars, createBursar,
 } from "@/lib/admin.functions";
+import { getEnrollment as getEnrollmentFull } from "@/lib/bursar.functions";
 import { DangerConfirm, useDangerConfirm } from "@/components/DangerConfirm";
 
 export const Route = createFileRoute("/admin")({
@@ -355,14 +356,22 @@ function RosterTable({ rows, onOpen, yearClosed }: { rows: any[]; onOpen: (r: an
 function StudentProfileDialog({ enrollment, yearClosed, onClose }: { enrollment: any; yearClosed: boolean; onClose: () => void }) {
   const dismissFn = useServerFn(dismissStudent);
   const promoteFn = useServerFn(setPromotion);
+  const getFn = useServerFn(getEnrollmentFull);
   const qc = useQueryClient();
   const danger = useDangerConfirm();
   const [reason, setReason] = useState("");
-  const s = enrollment.students; const c = enrollment.classes;
+  const { data: full } = useQuery({
+    queryKey: ["admin-enr", enrollment.id],
+    queryFn: () => getFn({ data: { enrollment_id: enrollment.id } }),
+  });
+  const s = (full as any)?.students ?? enrollment.students;
+  const c = (full as any)?.classes ?? enrollment.classes;
+  const fields = (full as any)?.fields ?? [];
+  const extra = (full as any)?.extra_fields ?? {};
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4" onClick={onClose}>
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4 overflow-y-auto py-8" onClick={onClose}>
         <div className="card-surface p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
           <div className="flex justify-between items-start">
             <div>
@@ -373,13 +382,26 @@ function StudentProfileDialog({ enrollment, yearClosed, onClose }: { enrollment:
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <InfoField k="Registered" v={enrollment.is_registered ? "Yes" : "No"} />
-            <InfoField k="Kind" v={enrollment.enrollment_kind} />
-            <InfoField k="Paid" v={`${Number(enrollment.tuition_paid).toLocaleString()} XAF`} />
-            <InfoField k="Required" v={`${Number(enrollment.tuition_required).toLocaleString()} XAF`} />
             <InfoField k="Gender" v={s?.gender} />
+            <InfoField k="Date of birth" v={s?.date_of_birth} />
+            <InfoField k="Place of birth" v={s?.place_of_birth || "—"} />
             <InfoField k="Parent phone" v={s?.parent_phone} />
+            <InfoField k="Kind" v={enrollment.enrollment_kind} />
+            <InfoField k="Registered" v={enrollment.is_registered ? "Yes" : "No"} />
+            <InfoField k="Required" v={`${Number(enrollment.tuition_required).toLocaleString()} XAF`} />
+            <InfoField k="Paid" v={`${Number(enrollment.tuition_paid).toLocaleString()} XAF`} />
           </div>
+
+          {fields.length > 0 && (
+            <div className="mt-4">
+              <div className="text-xs uppercase text-muted-foreground mb-2">Admission details</div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                {fields.map((f: any) => (
+                  <InfoField key={f.id} k={f.label} v={String(extra[f.id] ?? "—")} />
+                ))}
+              </div>
+            </div>
+          )}
 
           <hr className="my-5 border-border" />
 
