@@ -431,9 +431,14 @@ function InfoField({ k, v }: { k: string; v: any }) {
 function YearParamsTab() {
   const fn = useServerFn(getYearParameters);
   const closeFn = useServerFn(closeSchoolYear);
+  const queueFn = useServerFn(listPromotionQueue);
   const qc = useQueryClient();
   const danger = useDangerConfirm();
   const { data, isLoading } = useQuery({ queryKey: ["year-params"], queryFn: () => fn() });
+  const [subView, setSubView] = useState<"gate" | "promotion" | "wizard">("gate");
+  const { data: queue, isLoading: queueLoading } = useQuery({
+    queryKey: ["promotion-queue"], queryFn: () => queueFn(),
+  });
 
   if (isLoading) return <Loader2 className="h-5 w-5 animate-spin mx-auto" />;
 
@@ -441,7 +446,27 @@ function YearParamsTab() {
   const isOpen = year && year.status === "OPEN";
 
   if (!isOpen) {
-    return <CreateYearWizard hasClosedPrevious={!!year} onCreated={() => { qc.invalidateQueries(); }} />;
+    if (queueLoading) return <Loader2 className="h-5 w-5 animate-spin mx-auto" />;
+    const rows = (queue?.rows ?? []) as any[];
+    const undecided = rows.filter(r => !r.promotion_decision).length;
+    const promoted = rows.filter(r => r.promotion_decision === "PROMOTED").length;
+    const repeated = rows.filter(r => r.promotion_decision === "REPEATED").length;
+
+    if (subView === "promotion" && queue?.year) {
+      return <PromotionQueueView closedYearLabel={queue.year.label} rows={rows} onBack={() => setSubView("gate")} />;
+    }
+    if (subView === "wizard" && undecided === 0) {
+      return <CreateYearWizard hasClosedPrevious={!!year} promoted={promoted} repeated={repeated} onCreated={() => { qc.invalidateQueries(); setSubView("gate"); }} onCancel={() => setSubView("gate")} />;
+    }
+    return (
+      <PromotionGate
+        yearLabel={queue?.year?.label ?? year?.label ?? ""}
+        undecided={undecided} total={rows.length}
+        promoted={promoted} repeated={repeated}
+        onOpenPromotion={() => setSubView("promotion")}
+        onOpenWizard={() => setSubView("wizard")}
+      />
+    );
   }
 
   return (
