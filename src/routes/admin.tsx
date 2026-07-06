@@ -533,9 +533,9 @@ function YearParamsTab() {
   );
 }
 
-function CreateYearWizard({ hasClosedPrevious, onCreated }: { hasClosedPrevious: boolean; onCreated: () => void }) {
+function CreateYearWizard({ hasClosedPrevious, promoted = 0, repeated = 0, onCreated, onCancel }: { hasClosedPrevious: boolean; promoted?: number; repeated?: number; onCreated: () => void; onCancel?: () => void }) {
   const createFn = useServerFn(createSchoolYear);
-  const queueFn = useServerFn(listPromotionQueue);
+
   const [step, setStep] = useState(1);
   const [label, setLabel] = useState("");
   const [starts, setStarts] = useState(new Date().toISOString().slice(0, 10));
