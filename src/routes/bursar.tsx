@@ -424,11 +424,27 @@ function ProfileDialog({ enrollmentId, cashier, readOnly, onClose, onPaid }: {
               <div className="text-sm text-muted-foreground">{c?.name} · <span className="font-mono">{s?.matricule}</span></div>
 
               <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <Info k="Gender" v={s?.gender} />
+                <Info k="Date of birth" v={s?.date_of_birth} />
+                <Info k="Place of birth" v={s?.place_of_birth || "—"} />
+                <Info k="Parent phone" v={s?.parent_phone} />
+                <Info k="Enrollment" v={(enr as any).enrollment_kind === "NEW_ADMIT" ? "New admission" : "Returning"} />
                 <Info k="Registered" v={(enr as any).is_registered ? "Yes" : "No"} />
-                <Info k="Fee remaining" v={`${owed.toLocaleString()} XAF`} />
-                <Info k="Paid" v={`${Number((enr as any).tuition_paid).toLocaleString()} XAF`} />
                 <Info k="Required" v={`${Number((enr as any).tuition_required).toLocaleString()} XAF`} />
+                <Info k="Paid" v={`${Number((enr as any).tuition_paid).toLocaleString()} XAF`} />
+                <Info k="Fee remaining" v={`${owed.toLocaleString()} XAF`} />
               </div>
+
+              {((enr as any).fields ?? []).length > 0 && (
+                <div className="mt-4">
+                  <div className="text-xs uppercase text-muted-foreground mb-2">Admission details</div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {((enr as any).fields ?? []).map((f: any) => (
+                      <Info key={f.id} k={f.label} v={String(((enr as any).extra_fields ?? {})[f.id] ?? "—")} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {readOnly ? (
                 <div className="mt-5 chip-warning"><Lock className="h-4 w-4" /> Year is closed — no payments</div>
