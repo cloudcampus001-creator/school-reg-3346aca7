@@ -302,7 +302,7 @@ export type Database = {
           {
             foreignKeyName: "school_configs_school_id_fkey"
             columns: ["school_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "schools"
             referencedColumns: ["id"]
           },
