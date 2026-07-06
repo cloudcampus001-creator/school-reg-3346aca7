@@ -682,19 +682,24 @@ function CreateYearWizard({ hasClosedPrevious, promoted = 0, repeated = 0, onCre
       )}
 
       {step === 6 && hasClosedPrevious && (
-        <div className="mt-4">
+        <div className="mt-4 space-y-3">
           <label className="flex items-start gap-3 border border-border rounded-lg p-4">
             <input type="checkbox" className="mt-1" checked={rollForward} onChange={e => setRollForward(e.target.checked)} />
             <div>
               <div className="font-semibold text-sm">Roll students forward from last year</div>
-              <div className="text-xs text-muted-foreground mt-1">Non-dismissed students with a Promote/Repeat decision from the previous closed year will be enrolled into this new year automatically. They will need to register and pay again.</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                About to enroll <b>{promoted}</b> promoted student{promoted === 1 ? "" : "s"} into the next level, and re-enroll <b>{repeated}</b> repeater{repeated === 1 ? "" : "s"} into the same level. They will need to register and pay again.
+              </div>
             </div>
           </label>
         </div>
       )}
 
       <div className="mt-6 flex justify-between">
-        <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1} className="btn-ghost">Back</button>
+        <div className="flex gap-2">
+          <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1} className="btn-ghost">Back</button>
+          {onCancel && step === 1 && <button onClick={onCancel} className="btn-ghost">Cancel</button>}
+        </div>
         {step < (hasClosedPrevious ? 6 : 5) ? (
           <button onClick={() => setStep(step + 1)} className="btn-primary">Next</button>
         ) : (
@@ -705,4 +710,145 @@ function CreateYearWizard({ hasClosedPrevious, promoted = 0, repeated = 0, onCre
       </div>
     </div>
   );
+}
+
+/* ============ Promotion gate + queue view ============ */
+function PromotionGate({ yearLabel, undecided, total, promoted, repeated, onOpenPromotion, onOpenWizard }: {
+  yearLabel: string; undecided: number; total: number; promoted: number; repeated: number;
+  onOpenPromotion: () => void; onOpenWizard: () => void;
+}) {
+  const allDecided = undecided === 0 && total > 0;
+  return (
+    <div className="card-surface p-6 space-y-4">
+      <div>
+        <div className="text-xs uppercase text-muted-foreground">School year closed</div>
+        <div className="mt-1 text-2xl font-display font-bold">{yearLabel}</div>
+      </div>
+      {total === 0 ? (
+        <div className="text-sm text-muted-foreground">No students carry over from the closed year.</div>
+      ) : allDecided ? (
+        <div className="rounded-lg border border-border p-4 bg-muted/40">
+          <div className="text-sm font-semibold">All promotion decisions are in.</div>
+          <div className="text-xs text-muted-foreground mt-1">{promoted} promoted · {repeated} repeated. You can now open the next school year.</div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-warning/40 p-4 bg-warning/10">
+          <div className="text-sm font-semibold text-warning">Promotion decisions still pending</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            <b>{undecided}</b> of <b>{total}</b> students from {yearLabel} still need a Promote / Repeat decision.
+            Students without a decision are <b>not</b> rolled into the next year.
+          </div>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={onOpenPromotion} className="btn-primary"><ArrowUp className="h-4 w-4" /> Manage promotions</button>
+        <button onClick={onOpenWizard} disabled={!allDecided} className="btn-outline disabled:opacity-40 disabled:cursor-not-allowed">
+          <Plus className="h-4 w-4" /> Open next school year
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PromotionQueueView({ closedYearLabel, rows, onBack }: { closedYearLabel: string; rows: any[]; onBack: () => void }) {
+  const promoteFn = useServerFn(setPromotion);
+  const qc = useQueryClient();
+  const [onlyUndecided, setOnlyUndecided] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [bulking, setBulking] = useState(false);
+
+  const total = rows.length;
+  const decidedCount = rows.filter(r => r.promotion_decision).length;
+  const undecidedRows = rows.filter(r => !r.promotion_decision);
+  const shown = onlyUndecided ? undecidedRows : rows;
+
+  async function decide(id: string, decision: "PROMOTED" | "REPEATED") {
+    setBusyId(id);
+    try {
+      await promoteFn({ data: { enrollment_id: id, decision } });
+      await qc.invalidateQueries({ queryKey: ["promotion-queue"] });
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusyId(null); }
+  }
+
+  async function promoteAllRemaining() {
+    if (undecidedRows.length === 0) return;
+    setBulking(true);
+    try {
+      for (const r of undecidedRows) {
+        await promoteFn({ data: { enrollment_id: r.id, decision: "PROMOTED" } });
+      }
+      toast.success(`Promoted ${undecidedRows.length} remaining student${undecidedRows.length === 1 ? "" : "s"}`);
+      await qc.invalidateQueries({ queryKey: ["promotion-queue"] });
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBulking(false); }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="card-surface p-5 flex flex-wrap items-center gap-3 justify-between">
+        <div>
+          <div className="text-xs uppercase text-muted-foreground">Promotion queue · {closedYearLabel}</div>
+          <div className="mt-1 text-lg font-display font-bold">{decidedCount} of {total} decided</div>
+          <div className="text-xs text-muted-foreground">Decisions stay editable until the next year is created.</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={onlyUndecided} onChange={e => setOnlyUndecided(e.target.checked)} />
+            Only undecided
+          </label>
+          <button onClick={promoteAllRemaining} disabled={bulking || undecidedRows.length === 0} className="btn-primary text-sm">
+            {bulking ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+            Promote all remaining ({undecidedRows.length})
+          </button>
+          <button onClick={onBack} className="btn-ghost text-sm">Back</button>
+        </div>
+      </div>
+
+      <div className="card-surface p-5 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-muted-foreground border-b border-border">
+            <tr><th className="py-2">Student</th><th>Matricule</th><th>Class</th><th>Decision</th><th className="text-right">Action</th></tr>
+          </thead>
+          <tbody>
+            {shown.map((r: any) => {
+              const d = r.promotion_decision;
+              const isBusy = busyId === r.id;
+              return (
+                <tr key={r.id} className="border-b border-border">
+                  <td className="py-2 font-medium">{r.students?.full_name}</td>
+                  <td className="font-mono text-xs">{r.students?.matricule}</td>
+                  <td>{r.classes?.name ?? "—"}</td>
+                  <td>
+                    {d === "PROMOTED" && <span className="chip-success">Promoted</span>}
+                    {d === "REPEATED" && <span className="chip-warning">Repeat</span>}
+                    {!d && <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="text-right">
+                    <div className="inline-flex gap-1">
+                      <button disabled={isBusy} onClick={() => decide(r.id, "PROMOTED")}
+                        className={"text-xs px-2 py-1 rounded-md " + (d === "PROMOTED" ? "bg-primary text-primary-foreground" : "btn-outline")}>
+                        <ArrowUp className="h-3 w-3 inline" /> Promote
+                      </button>
+                      <button disabled={isBusy} onClick={() => decide(r.id, "REPEATED")}
+                        className={"text-xs px-2 py-1 rounded-md " + (d === "REPEATED" ? "bg-warning text-warning-foreground" : "btn-outline")}>
+                        <RotateCcw className="h-3 w-3 inline" /> Repeat
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {shown.length === 0 && (
+              <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">
+                {onlyUndecided ? "Every student has a decision. Nice." : "No students in the queue."}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 }
