@@ -850,5 +850,3 @@ function PromotionQueueView({ closedYearLabel, rows, onBack }: { closedYearLabel
     </div>
   );
 }
-
-}
