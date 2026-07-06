@@ -16,6 +16,7 @@ import {
   dismissStudent, setPromotion, getYearParameters, closeSchoolYear, createSchoolYear,
   listPromotionQueue, listBursars, createBursar,
 } from "@/lib/admin.functions";
+import { getEnrollment as getEnrollmentFull } from "@/lib/bursar.functions";
 import { DangerConfirm, useDangerConfirm } from "@/components/DangerConfirm";
 
 export const Route = createFileRoute("/admin")({
