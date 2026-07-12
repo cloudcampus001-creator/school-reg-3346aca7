@@ -13,6 +13,7 @@ import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "@/integrations/supabase/client";
+import { BackToTop } from "@/components/BackToTop";
 
 function NotFoundComponent() {
   return (
@@ -101,9 +102,22 @@ function RootComponent() {
     });
     return () => subscription.unsubscribe();
   }, [queryClient, router]);
+  // Toggle a data-scrolled attribute on any [data-nav-sticky] element as the page scrolls.
+  useEffect(() => {
+    const onScroll = () => {
+      const scrolled = window.scrollY > 8;
+      document.querySelectorAll<HTMLElement>("[data-nav-sticky]").forEach((el) => {
+        el.dataset.scrolled = scrolled ? "true" : "false";
+      });
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+      <BackToTop />
       <Toaster position="top-center" richColors />
     </QueryClientProvider>
   );
