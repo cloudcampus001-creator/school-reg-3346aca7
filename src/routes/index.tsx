@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { GraduationCap, ShieldCheck, Smartphone, Printer, Search, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Reveal } from "@/components/Reveal";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -17,22 +18,24 @@ function Landing() {
   return (
     <div className="min-h-screen">
       {/* Nav */}
-      <header className="max-w-6xl mx-auto px-5 py-5 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2 font-display font-bold text-lg">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg hero-gradient">
-            <GraduationCap className="h-5 w-5" />
-          </span>
-          SchoolConnect
-        </Link>
-        <nav className="flex items-center gap-2">
-          <Link to="/portal" className="btn-ghost hidden sm:inline-flex">Parent portal</Link>
-          <Link to="/auth" className="btn-outline">School staff</Link>
-        </nav>
+      <header data-nav-sticky className="nav-sticky">
+        <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2 font-display font-bold text-lg">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg hero-gradient">
+              <GraduationCap className="h-5 w-5" />
+            </span>
+            SchoolConnect
+          </Link>
+          <nav className="flex items-center gap-2">
+            <Link to="/portal" className="btn-ghost hidden sm:inline-flex">Parent portal</Link>
+            <Link to="/auth" className="btn-outline">School staff</Link>
+          </nav>
+        </div>
       </header>
 
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-5 pt-10 pb-20 grid lg:grid-cols-12 gap-10 items-center">
-        <div className="lg:col-span-7">
+        <Reveal className="lg:col-span-7">
           <span className="chip">Built for schools in Cameroon</span>
           <h1 className="mt-4 text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.05]">
             Skip the registration queue.
@@ -55,9 +58,9 @@ function Landing() {
             <div className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" /> MTN & Orange Money</div>
             <div className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" /> Thermal printing</div>
           </div>
-        </div>
+        </Reveal>
 
-        <div className="lg:col-span-5">
+        <Reveal className="lg:col-span-5" delay={120}>
           <div className="card-surface p-6 relative overflow-hidden">
             <div className="absolute -top-16 -right-16 h-48 w-48 rounded-full hero-gradient opacity-30 blur-2xl" />
             <div className="relative">
@@ -77,46 +80,52 @@ function Landing() {
               <button className="btn-primary w-full mt-5">Pay 20,000 XAF · MTN MoMo</button>
             </div>
           </div>
-        </div>
+        </Reveal>
       </section>
 
       {/* Features */}
       <section className="max-w-6xl mx-auto px-5 py-16">
-        <h2 className="text-3xl font-bold">One platform, every step.</h2>
-        <p className="mt-2 text-muted-foreground max-w-2xl">
-          From the application form to the printed receipt at the school gate.
-        </p>
+        <Reveal>
+          <h2 className="text-3xl font-bold">One platform, every step.</h2>
+          <p className="mt-2 text-muted-foreground max-w-2xl">
+            From the application form to the printed receipt at the school gate.
+          </p>
+        </Reveal>
         <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { icon: GraduationCap, title: "Bursar-led admissions", body: "Staff admit students in seconds. Matricule generated instantly, no pending queues." },
             { icon: Smartphone, title: "Mobile money", body: "MTN MoMo & Orange Money for registration and tuition — parents pay themselves." },
             { icon: Search, title: "Typo-tolerant search", body: "Parents find their child by name — spelling and word order are forgiven." },
             { icon: Printer, title: "Printed receipts", body: "Every payment prints an 80mm receipt via the browser's OS print dialog." },
-          ].map((f) => (
-            <div key={f.title} className="card-surface p-5">
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary">
-                <f.icon className="h-5 w-5" />
+          ].map((f, i) => (
+            <Reveal key={f.title} delay={i * 90}>
+              <div className="card-surface p-5 h-full">
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary">
+                  <f.icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-4 font-semibold">{f.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{f.body}</p>
               </div>
-              <h3 className="mt-4 font-semibold">{f.title}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{f.body}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       {/* CTA */}
       <section className="max-w-6xl mx-auto px-5 pb-24">
-        <div className="card-surface hero-gradient p-10 text-center">
-          <ShieldCheck className="h-10 w-10 mx-auto opacity-90" />
-          <h2 className="mt-4 text-3xl font-bold">Try the live demo</h2>
-          <p className="mt-2 opacity-90 max-w-xl mx-auto">
-            Register a student at the demo school, watch the status update in real time, and pay with simulated mobile money.
-          </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Link to="/portal" className="btn-outline">Parent portal</Link>
-            <Link to="/auth" className="btn-outline">Admin sign-in</Link>
+        <Reveal>
+          <div className="card-surface hero-gradient p-10 text-center">
+            <ShieldCheck className="h-10 w-10 mx-auto opacity-90" />
+            <h2 className="mt-4 text-3xl font-bold">Try the live demo</h2>
+            <p className="mt-2 opacity-90 max-w-xl mx-auto">
+              Register a student at the demo school, watch the status update in real time, and pay with simulated mobile money.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <Link to="/portal" className="btn-outline">Parent portal</Link>
+              <Link to="/auth" className="btn-outline">Admin sign-in</Link>
+            </div>
           </div>
-        </div>
+        </Reveal>
       </section>
 
       <footer className="max-w-6xl mx-auto px-5 py-8 text-sm text-muted-foreground flex justify-between">

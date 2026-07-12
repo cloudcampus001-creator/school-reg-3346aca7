@@ -119,15 +119,69 @@
   html {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
   }
   body {
     background: var(--gradient-surface);
     color: var(--color-foreground);
     min-height: 100vh;
+    text-rendering: optimizeLegibility;
   }
   h1, h2, h3, h4 {
     font-family: var(--font-display);
     letter-spacing: -0.02em;
+  }
+  img, video { max-width: 100%; height: auto; }
+
+  /* Themed scrollbar (WebKit) */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--color-primary) 60%, transparent);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  /* Firefox */
+  html { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--color-primary) 45%, transparent) transparent; }
+
+  /* Sticky header helper — avoids flicker while scrolling */
+  .nav-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    background: color-mix(in oklab, var(--color-background) 78%, transparent);
+    border-bottom: 1px solid transparent;
+    transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+    will-change: background-color;
+  }
+  .nav-sticky[data-scrolled="true"] {
+    background: color-mix(in oklab, var(--color-background) 92%, transparent);
+    border-bottom-color: var(--color-border);
+    box-shadow: 0 4px 20px oklch(0.36 0.16 264 / 0.06);
+  }
+
+  /* Consistent vertical rhythm between sections */
+  section + section { margin-top: clamp(2rem, 5vw, 4rem); }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 

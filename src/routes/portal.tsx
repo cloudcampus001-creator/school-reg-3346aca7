@@ -30,7 +30,7 @@ function PortalPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-border bg-surface">
+      <header data-nav-sticky className="nav-sticky">
         <div className="max-w-3xl mx-auto px-5 py-4 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 font-display font-bold">
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg hero-gradient">
