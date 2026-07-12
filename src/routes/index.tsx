@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { GraduationCap, ShieldCheck, Smartphone, Printer, Search, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Reveal } from "@/components/Reveal";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -17,17 +18,19 @@ function Landing() {
   return (
     <div className="min-h-screen">
       {/* Nav */}
-      <header className="max-w-6xl mx-auto px-5 py-5 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2 font-display font-bold text-lg">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg hero-gradient">
-            <GraduationCap className="h-5 w-5" />
-          </span>
-          SchoolConnect
-        </Link>
-        <nav className="flex items-center gap-2">
-          <Link to="/portal" className="btn-ghost hidden sm:inline-flex">Parent portal</Link>
-          <Link to="/auth" className="btn-outline">School staff</Link>
-        </nav>
+      <header data-nav-sticky className="nav-sticky">
+        <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2 font-display font-bold text-lg">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg hero-gradient">
+              <GraduationCap className="h-5 w-5" />
+            </span>
+            SchoolConnect
+          </Link>
+          <nav className="flex items-center gap-2">
+            <Link to="/portal" className="btn-ghost hidden sm:inline-flex">Parent portal</Link>
+            <Link to="/auth" className="btn-outline">School staff</Link>
+          </nav>
+        </div>
       </header>
 
       {/* Hero */}
